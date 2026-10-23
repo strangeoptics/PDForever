@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, Suspense, lazy } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -32,7 +32,9 @@ import {
   countTocItems,
   findActiveTocPage,
 } from './TocTreeNode';
-import { RagChatTab } from './RagChatTab';
+const RagChatTab = lazy(() =>
+  import('./RagChatTab').then((m) => ({ default: m.RagChatTab }))
+);
 
 const TAG_COLORS = [
   '#3b82f6',
@@ -601,15 +603,24 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
         {/* Tab 5: RAG Chat Assistant */}
         {sidebarTab === 'rag' && (
-          <RagChatTab
-            activeDoc={activeDoc}
-            currentFilterParams={currentFilterParams}
-            customOllamaUrl={settings.customOllamaUrl}
-            ragModel={settings.ragModel}
-            selectedFolderPath={selectedFolderPath}
-            selectedTagName={selectedTagName}
-            onNavigateToDocument={(docId, page) => onOpenDocument(docId, page)}
-          />
+          <Suspense
+            fallback={
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-slate-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                <span className="text-xs">Lade RAG Assistent…</span>
+              </div>
+            }
+          >
+            <RagChatTab
+              activeDoc={activeDoc}
+              currentFilterParams={currentFilterParams}
+              customOllamaUrl={settings.customOllamaUrl}
+              ragModel={settings.ragModel}
+              selectedFolderPath={selectedFolderPath}
+              selectedTagName={selectedTagName}
+              onNavigateToDocument={(docId, page) => onOpenDocument(docId, page)}
+            />
+          </Suspense>
         )}
 
         {/* Sidebar Footer: Quick Access to Settings (Einstellungen) */}

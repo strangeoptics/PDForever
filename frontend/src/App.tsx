@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo, Suspense, lazy } from 'react';
 import {
   FileText,
   RefreshCw,
@@ -9,6 +9,7 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Loader2,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -28,13 +29,20 @@ import {
 import { LeftSidebar } from './components/LeftSidebar';
 import { useSidebarResize } from './hooks/useSidebarResize';
 import { useDocumentFilters } from './hooks/useDocumentFilters';
-import { NoteModal } from './components/NoteModal';
 import { DocumentCard } from './components/DocumentCard';
 import { FacetedFilterBar } from './components/FacetedFilterBar';
 import { InstantSearchBar } from './components/InstantSearchBar';
-import { SettingsModal } from './components/SettingsModal';
 import { ContinueReadingShelf } from './components/ContinueReadingShelf';
-import { ReaderWorkspace } from './components/ReaderWorkspace';
+
+const ReaderWorkspace = lazy(() =>
+  import('./components/ReaderWorkspace').then((m) => ({ default: m.ReaderWorkspace }))
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const NoteModal = lazy(() =>
+  import('./components/NoteModal').then((m) => ({ default: m.NoteModal }))
+);
 
 const SETTINGS_STORAGE_KEY = 'pdforever.settings';
 const DARK_MODE_STORAGE_KEY = 'pdforever.darkMode';
@@ -761,6 +769,8 @@ export const App: React.FC = () => {
       </div>
 
       {/* Reading Note (Lesezettel) Creation / Editing Modal */}
+      {noteModalOpen && (
+        <Suspense fallback={null}>
       <NoteModal
         isOpen={noteModalOpen}
         pageNumber={pendingSelection.pageNumber}
@@ -773,8 +783,12 @@ export const App: React.FC = () => {
         }}
         onSave={handleSaveNote}
       />
+        </Suspense>
+      )}
 
       {/* Settings (Einstellungen) Modal */}
+      {settingsOpen && (
+        <Suspense fallback={null}>
       <SettingsModal
         isOpen={settingsOpen}
         settings={settings}
@@ -785,6 +799,8 @@ export const App: React.FC = () => {
         onCoversCleared={() => setCoverCacheVersion((v) => v + 1)}
         onMetadataEnriched={loadLibraryData}
       />
+        </Suspense>
+      )}
     </div>
   );
 };
