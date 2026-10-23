@@ -26,9 +26,11 @@ public class SearchService {
     private static final int MAX_PAGE_HITS = 100;
 
     private final LuceneIndexService luceneIndexService;
+    private final FileNameCleaner fileNameCleaner;
 
-    public SearchService(LuceneIndexService luceneIndexService) {
+    public SearchService(LuceneIndexService luceneIndexService, FileNameCleaner fileNameCleaner) {
         this.luceneIndexService = luceneIndexService;
+        this.fileNameCleaner = fileNameCleaner;
     }
 
     public List<SearchResultGroupDto> search(String rawQuery) {
@@ -71,7 +73,7 @@ public class SearchService {
                     int idx = relPath.lastIndexOf('/');
                     rawTitle = idx >= 0 ? relPath.substring(idx + 1) : relPath;
                 }
-                final String resolvedTitle = rawTitle;
+                final String resolvedTitle = fileNameCleaner.cleanFileName(rawTitle);
                 int pageNumber = luceneDoc.getField(FIELD_PAGE_NUMBER).numericValue().intValue();
 
                 String snippet = (snippets != null && i < snippets.length && snippets[i] != null && !snippets[i].isBlank())

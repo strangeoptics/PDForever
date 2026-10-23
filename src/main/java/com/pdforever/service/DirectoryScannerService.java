@@ -28,17 +28,20 @@ public class DirectoryScannerService {
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
     private final LuceneIndexService luceneIndexService;
+    private final FileNameCleaner fileNameCleaner;
 
     public DirectoryScannerService(
             LibraryProperties properties,
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
-            LuceneIndexService luceneIndexService
+            LuceneIndexService luceneIndexService,
+            FileNameCleaner fileNameCleaner
     ) {
         this.properties = properties;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
         this.luceneIndexService = luceneIndexService;
+        this.fileNameCleaner = fileNameCleaner;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -118,7 +121,7 @@ public class DirectoryScannerService {
 
         try {
             String relPath = toRelativePath(filePath);
-            String fileName = filePath.getFileName().toString();
+            String fileName = fileNameCleaner.cleanFileName(filePath.getFileName().toString());
             long fileSize = Files.size(filePath);
             Instant lastModifiedFs = Files.getLastModifiedTime(filePath).toInstant().truncatedTo(ChronoUnit.MILLIS);
 
@@ -131,8 +134,15 @@ public class DirectoryScannerService {
 
                 boolean timestampChanged = Math.abs(lastModifiedFs.toEpochMilli() - dbLastMod.toEpochMilli()) > 500;
                 boolean sizeChanged = !Objects.equals(existing.getFileSizeBytes(), fileSize);
+                boolean nameChanged = !Objects.equals(existing.getFileName(), fileName);
 
                 if (!existing.isDeleted() && !timestampChanged && !sizeChanged) {
+                    if (nameChanged) {
+                        existing.setFileName(fileName);
+                        documentRepository.save(existing);
+                        log.info("Updated cleaned display name for {}: {}", relPath, fileName);
+                        return IngestionOutcome.UPDATED;
+                    }
                     return IngestionOutcome.UNCHANGED;
                 }
 
@@ -236,7 +246,7 @@ public class DirectoryScannerService {
                         Document doc = docByRelPath.get(childRel);
                         if (doc != null && !doc.isDeleted()) {
                             fileChildren.add(new TreeNodeDto(
-                                    entry.getFileName().toString(),
+                                    doc.getFileName(),
                                     childRel,
                                     "file",
                                     doc.getId(),

@@ -3,13 +3,16 @@ package com.pdforever.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.nio.file.Path;
+import java.util.List;
 
 @ConfigurationProperties(prefix = "library")
 public record LibraryProperties(
         Path rootDir,
         Path luceneDir,
         long debounceMs,
-        boolean watcherEnabled
+        boolean watcherEnabled,
+        List<String> cleanRemoveLiterals,
+        List<String> cleanRemoveRegexes
 ) {
     public LibraryProperties {
         if (rootDir == null) {

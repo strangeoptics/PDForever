@@ -70,6 +70,9 @@ class IngestionAndSearchIntegrationTest {
     private FileWatcherService fileWatcherService;
 
     @Autowired
+    private com.pdforever.service.FileNameCleaner fileNameCleaner;
+
+    @Autowired
     private LibraryProperties libraryProperties;
 
     @Autowired
@@ -175,6 +178,13 @@ class IngestionAndSearchIntegrationTest {
         createSamplePdf(debouncedFile, List.of("Stable file content."));
         boolean stable = fileWatcherService.waitForFileSizeStability(debouncedFile, 50L, 4);
         assertThat(stable).isTrue();
+
+        // 9. Verify FileNameCleaner rules
+        assertThat(fileNameCleaner.cleanFileName("Essen_und_Trinken_Fur_jeden_Tag_1.23_de.downmagaz.net.pdf"))
+                .isEqualTo("Essen_und_Trinken_Fur_jeden_Tag_1.23.pdf");
+        assertThat(fileNameCleaner.cleanFileName(
+                "Ethnologie - Biographie einer Kulturwissenschaft -- Roman Loimeier; Dietrich-Reimer-Verlag -- 1_ Auflage, Berlin, 2021 -- Dietrich Reimer Verlag GmbH -- 9783496016663  -- Anna's A.pdf"
+        )).isEqualTo("Ethnologie - Biographie einer Kulturwissenschaft -- Roman Loimeier; Dietrich-Reimer-Verlag -- 1_ Auflage, Berlin, 2021.pdf");
     }
 
     private void createSamplePdf(Path target, List<String> pageContents) throws IOException {
