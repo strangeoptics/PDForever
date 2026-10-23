@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: pdforever
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:sqlite:./data/pdforever.db?journal_mode=WAL&busy_timeout=5000&foreign_keys=on
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      connection-init-sql: PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
+server:
+  port: 8080
+
+library:
+  root-dir: ./storage
+  lucene-dir: ./data/lucene-index
+  debounce-ms: 2000
+  watcher-enabled: true
+
