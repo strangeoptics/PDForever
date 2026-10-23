@@ -34,12 +34,7 @@ import {
   Calendar,
   ArrowUpDown,
   Bot,
-  Send,
-  Copy,
-  Check,
-  AlertCircle,
   MessageSquare,
-  BookOpen,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -48,15 +43,13 @@ import {
   DocumentFacets,
   DocumentFilterParams,
   DocumentItem,
-  OllamaStatus,
-  RagPassage,
-  RagQueryPayload,
   ReadingNote,
   ReadingStatus,
   SearchResultGroup,
   Tag,
   TocItem,
   TreeNode,
+  UpdateMetadataPayload,
   UpdateReadingProgressPayload,
 } from './types';
 import {
@@ -67,6 +60,9 @@ import {
 } from './components/PdfViewer';
 import { NoteModal } from './components/NoteModal';
 import { DocumentCover } from './components/DocumentCover';
+import { DocumentCard } from './components/DocumentCard';
+import { RightInspector } from './components/RightInspector';
+import { RagChatTab } from './components/RagChatTab';
 import { SettingsModal } from './components/SettingsModal';
 
 const SETTINGS_STORAGE_KEY = 'pdforever.settings';
@@ -143,28 +139,6 @@ export const App: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState<number>(loadInitialSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadInitialSidebarCollapsed);
   const [isResizingSidebar, setIsResizingSidebar] = useState<boolean>(false);
-
-  // RAG Chat State
-  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
-  const [ragScope, setRagScope] = useState<'current' | 'library'>('current');
-  const [ragQuery, setRagQuery] = useState<string>('');
-  const [ragLoading, setRagLoading] = useState<boolean>(false);
-  const [ragStreamingText, setRagStreamingText] = useState<string>('');
-  const [ragStreamingPassages, setRagStreamingPassages] = useState<RagPassage[]>([]);
-  const [ragMessages, setRagMessages] = useState<
-    Array<{
-      id: string;
-      role: 'user' | 'assistant';
-      text: string;
-      passages?: RagPassage[];
-      timestamp: number;
-      error?: boolean;
-    }>
-  >([]);
-  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
-  const [ragCopiedCmd, setRagCopiedCmd] = useState<boolean>(false);
-  const ragAbortControllerRef = useRef<AbortController | null>(null);
-  const ragMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Data state
   const [tree, setTree] = useState<TreeNode | null>(null);
@@ -246,25 +220,8 @@ export const App: React.FC = () => {
   const [editingNote, setEditingNote] = useState<ReadingNote | null>(null);
   const [syncing, setSyncing] = useState<boolean>(false);
 
-  // Document Metadata Enrichment & Editing state
+  // Document Metadata Enrichment state
   const [enrichingDoc, setEnrichingDoc] = useState<boolean>(false);
-  const [editingMetadata, setEditingMetadata] = useState<boolean>(false);
-  const [showAbstract, setShowAbstract] = useState<boolean>(false);
-  const [metaForm, setMetaForm] = useState<{
-    doi: string;
-    isbn: string;
-    metaTitle: string;
-    authors: string;
-    publicationYear: string;
-    abstractText: string;
-  }>({
-    doi: '',
-    isbn: '',
-    metaTitle: '',
-    authors: '',
-    publicationYear: '',
-    abstractText: '',
-  });
 
   // Theme sync
   useEffect(() => {
@@ -489,15 +446,11 @@ export const App: React.FC = () => {
       setDocOutline([]);
       setOutlineLoading(false);
       setTocFilter('');
-      setEditingMetadata(false);
-      setShowAbstract(false);
       return;
     }
     let cancelled = false;
     setOutlineLoading(true);
     setTocFilter('');
-    setEditingMetadata(false);
-    setShowAbstract(false);
     setActiveViewerPage(activeDoc.lastReadPage || 1);
 
     api
@@ -651,248 +604,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Load Ollama status when switching to RAG tab or changing Ollama settings
-  useEffect(() => {
-    if (sidebarTab === 'rag') {
-      api
-        .getRagStatus(settings.customOllamaUrl)
-        .then(setOllamaStatus)
-        .catch(() => {
-          setOllamaStatus({
-            enabled: true,
-            available: false,
-            ollamaUrl: settings.customOllamaUrl || 'http://localhost:11434',
-            currentModel: settings.ragModel || 'qwen2.5:14b',
-            installedModels: [],
-            message: 'Ollama ist offline oder nicht erreichbar.',
-          });
-        });
-    }
-  }, [sidebarTab, settings.customOllamaUrl, settings.ragModel]);
-
-  // Auto-scroll RAG chat
-  useEffect(() => {
-    if (sidebarTab === 'rag') {
-      ragMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [ragMessages, ragStreamingText, sidebarTab]);
-
-  const handleSendRagQuery = useCallback(
-    (promptText?: string) => {
-      const q = (promptText ?? ragQuery).trim();
-      if (!q || ragLoading) return;
-
-      const userMsgId = 'user-' + Date.now();
-      const assistantMsgId = 'asst-' + (Date.now() + 1);
-
-      setRagMessages((prev) => [
-        ...prev,
-        {
-          id: userMsgId,
-          role: 'user',
-          text: q,
-          timestamp: Date.now(),
-        },
-      ]);
-      setRagQuery('');
-      setRagLoading(true);
-      setRagStreamingText('');
-      setRagStreamingPassages([]);
-
-      const abortController = new AbortController();
-      ragAbortControllerRef.current = abortController;
-
-      let accumulatedText = '';
-      let collectedPassages: RagPassage[] = [];
-
-      const payload: RagQueryPayload = {
-        query: q,
-        model: settings.ragModel || 'qwen2.5:14b',
-      };
-
-      if (ragScope === 'current' && activeDoc) {
-        payload.documentId = activeDoc.id;
-      } else {
-        payload.criteria = currentFilterParams;
-      }
-
-      api.streamRag(
-        payload,
-        (passages) => {
-          collectedPassages = passages;
-          setRagStreamingPassages(passages);
-        },
-        (token) => {
-          accumulatedText += token;
-          setRagStreamingText(accumulatedText);
-        },
-        (error) => {
-          setRagMessages((prev) => [
-            ...prev,
-            {
-              id: assistantMsgId,
-              role: 'assistant',
-              text: accumulatedText.trim()
-                ? accumulatedText
-                : `Hinweis: ${error}\n\nDie relevanten Suchpassagen aus deinen PDF-Dokumenten wurden oben dennoch ermittelt.`,
-              passages: collectedPassages,
-              timestamp: Date.now(),
-              error: true,
-            },
-          ]);
-        },
-        () => {
-          setRagLoading(false);
-          setRagStreamingText('');
-          setRagStreamingPassages([]);
-          ragAbortControllerRef.current = null;
-          if (accumulatedText.trim()) {
-            setRagMessages((prev) => {
-              if (prev.some((m) => m.id === assistantMsgId)) return prev;
-              return [
-                ...prev,
-                {
-                  id: assistantMsgId,
-                  role: 'assistant',
-                  text: accumulatedText,
-                  passages: collectedPassages,
-                  timestamp: Date.now(),
-                },
-              ];
-            });
-          }
-        },
-        abortController.signal
-      );
-    },
-    [
-      ragQuery,
-      ragLoading,
-      ragScope,
-      activeDoc,
-      settings.ragModel,
-      currentFilterParams,
-    ]
-  );
-
-  const handleStopRagStream = useCallback(() => {
-    if (ragAbortControllerRef.current) {
-      ragAbortControllerRef.current.abort();
-      ragAbortControllerRef.current = null;
-      setRagLoading(false);
-    }
-  }, []);
-
-  const renderGroundedAnswer = useCallback(
-    (text: string, passages?: RagPassage[]) => {
-      const citationRegex = /\[(?:([^,\]]+),\s*)?S\.\s*(\d+)(?:-(\d+))?\]/g;
-      const paragraphs = text.split(/\n\s*\n/);
-
-      const renderInlineMarkdown = (chunk: string, keyPrefix: string): React.ReactNode => {
-        const tokenRegex = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
-        const segments = chunk.split(tokenRegex);
-
-        return segments.map((seg, idx) => {
-          if (seg.startsWith('**') && seg.endsWith('**') && seg.length > 4) {
-            return (
-              <strong key={`${keyPrefix}-${idx}`} className="font-semibold text-slate-900 dark:text-white">
-                {seg.slice(2, -2)}
-              </strong>
-            );
-          }
-          if (seg.startsWith('`') && seg.endsWith('`') && seg.length > 2) {
-            return (
-              <code
-                key={`${keyPrefix}-${idx}`}
-                className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-900 text-[11px] font-mono text-purple-600 dark:text-purple-300 border border-slate-200 dark:border-slate-700/60 break-all"
-              >
-                {seg.slice(1, -1)}
-              </code>
-            );
-          }
-          if (seg.startsWith('*') && seg.endsWith('*') && seg.length > 2) {
-            return (
-              <em key={`${keyPrefix}-${idx}`} className="italic">
-                {seg.slice(1, -1)}
-              </em>
-            );
-          }
-          return seg;
-        });
-      };
-
-      return paragraphs.map((para, pIdx) => {
-        if (!para.trim()) return null;
-
-        const parts: React.ReactNode[] = [];
-        let lastIndex = 0;
-        let match: RegExpExecArray | null;
-
-        citationRegex.lastIndex = 0;
-        while ((match = citationRegex.exec(para)) !== null) {
-          const matchStart = match.index;
-          const matchEnd = match.index + match[0].length;
-          if (matchStart > lastIndex) {
-            parts.push(renderInlineMarkdown(para.substring(lastIndex, matchStart), `${pIdx}-${lastIndex}`));
-          }
-
-          const rawCitation = match[0];
-          const citedDocTitle = match[1]?.trim();
-          const pageNum = parseInt(match[2], 10);
-
-          let targetDocId = activeDoc?.id;
-          if (citedDocTitle && passages && passages.length > 0) {
-            const matchLower = citedDocTitle.toLowerCase();
-            const found = passages.find(
-              (p) =>
-                p.documentTitle.toLowerCase().includes(matchLower) ||
-                matchLower.includes(p.documentTitle.toLowerCase())
-            );
-            if (found) {
-              targetDocId = found.documentId;
-            }
-          } else if (!targetDocId && passages && passages.length > 0) {
-            const found = passages.find((p) => p.pageNumber === pageNum) ?? passages[0];
-            targetDocId = found.documentId;
-          }
-
-          parts.push(
-            <button
-              key={`cit-${pIdx}-${matchStart}`}
-              type="button"
-              onClick={() => {
-                if (targetDocId) {
-                  handleOpenDocument(targetDocId, pageNum);
-                }
-              }}
-              className="inline-flex items-center gap-1 mx-1 my-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold bg-purple-500/15 hover:bg-purple-500/25 text-purple-700 dark:text-purple-300 border border-purple-500/30 transition shadow-2xs hover:scale-105 active:scale-95 cursor-pointer align-baseline shrink-0 max-w-full"
-              title={`Öffne Dokument auf Seite ${pageNum}`}
-            >
-              <BookOpen className="w-3 h-3 shrink-0" />
-              <span className="truncate">{rawCitation}</span>
-            </button>
-          );
-
-          lastIndex = matchEnd;
-        }
-
-        if (lastIndex < para.length) {
-          parts.push(renderInlineMarkdown(para.substring(lastIndex), `${pIdx}-${lastIndex}`));
-        }
-
-        return (
-          <p
-            key={`p-${pIdx}`}
-            className="text-xs text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0"
-          >
-            {parts}
-          </p>
-        );
-      });
-    },
-    [activeDoc, handleOpenDocument]
-  );
-
   const handleCreateTag = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTagName.trim()) return;
@@ -938,41 +649,16 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleStartEditMetadata = () => {
-    if (!activeDoc) return;
-    setMetaForm({
-      doi: activeDoc.doi || '',
-      isbn: activeDoc.isbn || '',
-      metaTitle: activeDoc.metaTitle || '',
-      authors: activeDoc.authors || '',
-      publicationYear: activeDoc.publicationYear ? String(activeDoc.publicationYear) : '',
-      abstractText: activeDoc.abstractText || '',
-    });
-    setEditingMetadata(true);
-  };
-
-  const handleSaveMetadata = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveMetadata = async (metadataPayload: UpdateMetadataPayload) => {
     if (!activeDoc) return;
     setEnrichingDoc(true);
     try {
-      const yearNum = metaForm.publicationYear.trim()
-        ? Number.parseInt(metaForm.publicationYear.trim(), 10)
-        : 0;
-      const updated = await api.updateDocumentMetadata(activeDoc.id, {
-        doi: metaForm.doi.trim(),
-        isbn: metaForm.isbn.trim(),
-        metaTitle: metaForm.metaTitle.trim(),
-        authors: metaForm.authors.trim(),
-        publicationYear: Number.isNaN(yearNum) ? 0 : yearNum,
-        abstractText: metaForm.abstractText.trim(),
-      });
+      const updated = await api.updateDocumentMetadata(activeDoc.id, metadataPayload);
       setActiveDoc(updated);
       setSecondaryDoc((prev) => (prev && prev.id === updated.id ? updated : prev));
       setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       setAllDocumentsList((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       setRecentDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-      setEditingMetadata(false);
     } catch (err) {
       console.error('Failed to update document metadata:', err);
     } finally {
@@ -1027,37 +713,6 @@ export const App: React.FC = () => {
     }
     setGlobalNotes((prev) => prev.filter((n) => n.id !== noteId));
     loadLibraryData();
-  };
-
-  const renderStatusBadge = (doc: DocumentItem) => {
-    const status: ReadingStatus = doc.readingStatus || 'UNREAD';
-    const pct = Math.min(
-      100,
-      Math.max(0, Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100))
-    );
-
-    if (status === 'COMPLETED') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 className="w-3 h-3" />
-          Gelesen
-        </span>
-      );
-    }
-    if (status === 'READING') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
-          <Clock className="w-3 h-3" />
-          S. {doc.lastReadPage || 1}/{doc.pageCount} ({pct}%)
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-        <CircleDashed className="w-3 h-3" />
-        Ungelesen
-      </span>
-    );
   };
 
   return (
@@ -1601,310 +1256,15 @@ export const App: React.FC = () => {
 
           {/* Tab 5: RAG Chat Assistant */}
           {sidebarTab === 'rag' && (
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-slate-50/30 dark:bg-slate-900/40">
-              {/* Header / Scope switch */}
-              <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 space-y-2 bg-white dark:bg-slate-900 shrink-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Bot className="w-4 h-4 text-purple-500" />
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      RAG-Assistent
-                    </span>
-                  </div>
-                  <span
-                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                      ollamaStatus?.available
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        ollamaStatus?.available ? 'bg-emerald-500' : 'bg-amber-500'
-                      }`}
-                    />
-                    {ollamaStatus?.available
-                      ? ollamaStatus.currentModel || 'qwen2.5:14b'
-                      : 'Ollama offline'}
-                  </span>
-                </div>
-
-                {/* Scope selector */}
-                <div className="grid grid-cols-2 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium">
-                  <button
-                    type="button"
-                    onClick={() => setRagScope('current')}
-                    disabled={!activeDoc}
-                    className={`py-1 px-2 rounded-md transition truncate ${
-                      ragScope === 'current'
-                        ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-2xs font-semibold'
-                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-40'
-                    }`}
-                    title={
-                      activeDoc
-                        ? `Nur im geöffneten Dokument suchen: ${activeDoc.metaTitle || activeDoc.fileName}`
-                        : 'Kein Dokument geöffnet'
-                    }
-                  >
-                    {activeDoc ? 'Aktuelles Dokument' : 'Dokument wählen'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRagScope('library')}
-                    className={`py-1 px-2 rounded-md transition truncate ${
-                      ragScope === 'library'
-                        ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-2xs font-semibold'
-                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                    }`}
-                    title="Im gesamten (bzw. durch Filter eingeschränkten) Bibliotheksbestand suchen"
-                  >
-                    Bibliothek {selectedFolderPath || selectedTagName ? '(Gefiltert)' : ''}
-                  </button>
-                </div>
-              </div>
-
-              {/* Offline Warning Banner if Ollama is not reachable */}
-              {ollamaStatus && !ollamaStatus.available && (
-                <div className="m-2 p-2.5 rounded-xl border border-amber-300/80 dark:border-amber-900/60 bg-amber-500/10 text-xs space-y-1.5 shrink-0">
-                  <div className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-400">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>Ollama offline (RAG optional)</span>
-                  </div>
-                  <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-normal">
-                    PDForever funktioniert vollkommen normal ohne Ollama. Starte für KI-Antworten in der Konsole:
-                  </p>
-                  <div className="flex items-center justify-between gap-1 bg-slate-900 text-slate-200 px-2 py-1 rounded font-mono text-[11px]">
-                    <span className="truncate">ollama run {settings.ragModel || 'qwen2.5:14b'}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`ollama run ${settings.ragModel || 'qwen2.5:14b'}`);
-                        setRagCopiedCmd(true);
-                        setTimeout(() => setRagCopiedCmd(false), 2000);
-                      }}
-                      className="p-0.5 hover:text-white transition shrink-0"
-                      title="Befehl kopieren"
-                    >
-                      {ragCopiedCmd ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Chat Message Scroll Area */}
-              <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 space-y-3">
-                {ragMessages.length === 0 && !ragLoading ? (
-                  <div className="text-center py-6 px-3 space-y-3">
-                    <div className="w-10 h-10 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto">
-                      <Bot className="w-5 h-5" />
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {ragScope === 'current' && activeDoc
-                          ? `Frage zum Dokument stellen`
-                          : 'Frage an die Bibliothek stellen'}
-                      </h4>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal">
-                        {ragScope === 'current' && activeDoc
-                          ? `Recherchiert gezielt in „${activeDoc.metaTitle || activeDoc.fileName}“ mit Belegstellen [S. X].`
-                          : 'Recherchiert passgenau über Lucene-Passagen in deiner PDF-Sammlung.'}
-                      </p>
-                    </div>
-
-                    {/* Quick suggestion buttons */}
-                    <div className="flex flex-col gap-1.5 pt-2 text-left">
-                      <button
-                        type="button"
-                        onClick={() => handleSendRagQuery('Was sind die zentralen Kernaussagen und Thesen?')}
-                        className="text-[11px] p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-purple-400 bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 transition text-left"
-                      >
-                        💡 Was sind die zentralen Kernaussagen und Thesen?
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSendRagQuery('Fasse den Inhalt prägnant in 3 Stichpunkten zusammen.')}
-                        className="text-[11px] p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-purple-400 bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 transition text-left"
-                      >
-                        📝 Fasse den Inhalt in 3 Stichpunkten zusammen.
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  ragMessages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`w-full min-w-0 flex flex-col space-y-1.5 ${
-                        msg.role === 'user' ? 'items-end' : 'items-start'
-                      }`}
-                    >
-                      {msg.role === 'user' ? (
-                        <div className="max-w-[85%] rounded-2xl rounded-br-xs bg-purple-600 text-white px-3 py-2 text-xs shadow-xs break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
-                          {msg.text}
-                        </div>
-                      ) : (
-                        <div className="w-full min-w-0 max-w-full rounded-2xl rounded-tl-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 shadow-xs space-y-2 overflow-hidden break-words [overflow-wrap:anywhere]">
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-400 pb-1.5 border-b border-slate-100 dark:border-slate-700">
-                            <span className="flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-400">
-                              <Bot className="w-3 h-3" />
-                              Antwort
-                            </span>
-                            {msg.passages && msg.passages.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setExpandedSources((prev) => ({
-                                    ...prev,
-                                    [msg.id]: !prev[msg.id],
-                                  }))
-                                }
-                                className="flex items-center gap-1 hover:text-purple-500 transition cursor-pointer"
-                              >
-                                <span>{msg.passages.length} Quellen</span>
-                                <ChevronDown
-                                  className={`w-3 h-3 transition-transform ${
-                                    expandedSources[msg.id] ? 'rotate-180' : ''
-                                  }`}
-                                />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Grounded text with citations */}
-                          <div className="space-y-2 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
-                            {renderGroundedAnswer(msg.text, msg.passages)}
-                          </div>
-
-                          {/* Passages Accordion */}
-                          {msg.passages && msg.passages.length > 0 && expandedSources[msg.id] && (
-                            <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 space-y-2 min-w-0">
-                              <div className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-400 tracking-wider">
-                                Verwendete Lucene-Passagen
-                              </div>
-                              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                                {msg.passages.map((p, pIdx) => (
-                                  <div
-                                    key={pIdx}
-                                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/80 text-[11px] space-y-1 min-w-0 overflow-hidden break-words"
-                                  >
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className="font-semibold text-slate-700 dark:text-slate-200 truncate">
-                                        {p.documentTitle}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenDocument(p.documentId, p.pageNumber)}
-                                        className="shrink-0 px-1.5 py-0.5 rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 font-mono text-[10px] font-semibold flex items-center gap-0.5 transition"
-                                      >
-                                        <span>S. {p.pageNumber}</span>
-                                        <ExternalLink className="w-2.5 h-2.5" />
-                                      </button>
-                                    </div>
-                                    <p className="text-slate-600 dark:text-slate-300 italic line-clamp-3 break-words [overflow-wrap:anywhere]">
-                                      "{p.passageText}"
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-
-                {/* Live streaming message */}
-                {ragLoading && (
-                  <div className="w-full min-w-0 max-w-full rounded-2xl rounded-tl-xs border border-purple-200 dark:border-purple-800/80 bg-white dark:bg-slate-800 p-3 shadow-xs space-y-2 overflow-hidden break-words [overflow-wrap:anywhere] animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 pb-1.5 border-b border-slate-100 dark:border-slate-700">
-                      <span className="flex items-center gap-1.5 font-semibold text-purple-600 dark:text-purple-400">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>Generiere Antwort…</span>
-                      </span>
-                      {ragStreamingPassages.length > 0 && (
-                        <span className="text-[10px] text-purple-500 font-medium">
-                          {ragStreamingPassages.length} Quellen gefunden
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="space-y-2 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
-                      {ragStreamingText ? (
-                        renderGroundedAnswer(ragStreamingText, ragStreamingPassages)
-                      ) : (
-                        <p className="text-xs text-slate-400 italic">
-                          Recherchiere im Dokumentbestand und befrage Ollama…
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-                <div ref={ragMessagesEndRef} />
-              </div>
-
-              {/* Chat Input Bar */}
-              <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-1.5 shrink-0">
-                {ragMessages.length > 0 && (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setRagMessages([])}
-                      className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
-                    >
-                      Chat-Verlauf leeren
-                    </button>
-                  </div>
-                )}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSendRagQuery();
-                  }}
-                  className="flex items-end gap-1.5"
-                >
-                  <textarea
-                    rows={2}
-                    value={ragQuery}
-                    onChange={(e) => setRagQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendRagQuery();
-                      }
-                    }}
-                    placeholder={
-                      ragScope === 'current' && activeDoc
-                        ? `Frage an ${activeDoc.metaTitle || activeDoc.fileName}…`
-                        : 'Frage an die Bibliothek stellen…'
-                    }
-                    className="flex-1 resize-none px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-purple-500 leading-normal"
-                  />
-                  {ragLoading ? (
-                    <button
-                      type="button"
-                      onClick={handleStopRagStream}
-                      className="p-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white transition shrink-0"
-                      title="Generierung anhalten"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={!ragQuery.trim()}
-                      className="p-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-40 transition shrink-0 shadow-xs"
-                      title="Frage absenden (Enter)"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  )}
-                </form>
-              </div>
-            </div>
+            <RagChatTab
+              activeDoc={activeDoc}
+              currentFilterParams={currentFilterParams}
+              customOllamaUrl={settings.customOllamaUrl}
+              ragModel={settings.ragModel}
+              selectedFolderPath={selectedFolderPath}
+              selectedTagName={selectedTagName}
+              onNavigateToDocument={(docId, page) => handleOpenDocument(docId, page)}
+            />
           )}
 
           {/* Sidebar Footer: Quick Access to Settings (Einstellungen) */}
@@ -2035,365 +1395,38 @@ export const App: React.FC = () => {
 
               {/* Right Split-Pane Inspector: Reading Status, Document Tags & Reading Notes (Lesezettel) */}
               {inspectorOpen && (
-                <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col h-full overflow-hidden">
-                  {/* Reading Progress & Status Section */}
-                  <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-blue-500" />
-                        Lesefortschritt & Status
-                      </h4>
-                      <span className="text-[11px] font-mono text-slate-500">
-                        S. {activeDoc.lastReadPage || 1} / {activeDoc.pageCount}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(
-                        [
-                          { id: 'UNREAD', label: 'Ungelesen', icon: CircleDashed },
-                          { id: 'READING', label: 'Am Lesen', icon: Clock },
-                          { id: 'COMPLETED', label: 'Gelesen', icon: CheckCircle2 },
-                        ] as const
-                      ).map((st) => {
-                        const isCurrent = (activeDoc.readingStatus || 'UNREAD') === st.id;
-                        const Icon = st.icon;
-                        return (
-                          <button
-                            key={st.id}
-                            type="button"
-                            onClick={() =>
-                              handleUpdateReadingProgress(activeDoc.id, {
-                                readingStatus: st.id,
-                              })
-                            }
-                            className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-[11px] font-medium border transition ${
-                              isCurrent
-                                ? st.id === 'COMPLETED'
-                                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                  : st.id === 'READING'
-                                  ? 'border-amber-500 bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                  : 'border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                                : 'border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
-                          >
-                            <Icon className="w-3 h-3 shrink-0" />
-                            <span className="truncate">{st.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Document Metadata Section (DOI / ISBN / CrossRef / OpenLibrary / Semantic Scholar) */}
-                  <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-                        Metadaten (DOI / ISBN)
-                      </h4>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={handleEnrichActiveDoc}
-                          disabled={enrichingDoc}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition"
-                          title="Seiten 1–3 nach DOI/ISBN scannen & CrossRef / Semantic Scholar / OpenLibrary abfragen"
-                        >
-                          <RefreshCw className={`w-3 h-3 ${enrichingDoc ? 'animate-spin' : ''}`} />
-                          {enrichingDoc ? 'Lädt…' : 'API-Abfrage'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            editingMetadata ? setEditingMetadata(false) : handleStartEditMetadata()
-                          }
-                          className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                          title="Metadaten manuell bearbeiten"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {editingMetadata ? (
-                      <form onSubmit={handleSaveMetadata} className="space-y-2 pt-1">
-                        <input
-                          type="text"
-                          value={metaForm.metaTitle}
-                          onChange={(e) =>
-                            setMetaForm((f) => ({ ...f, metaTitle: e.target.value }))
-                          }
-                          placeholder="Titel (leer lassen für API-Auflösung via DOI/ISBN)"
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div className="grid grid-cols-3 gap-1.5">
-                          <input
-                            type="text"
-                            value={metaForm.authors}
-                            onChange={(e) =>
-                              setMetaForm((f) => ({ ...f, authors: e.target.value }))
-                            }
-                            placeholder="Autoren"
-                            className="col-span-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <input
-                            type="number"
-                            value={metaForm.publicationYear}
-                            onChange={(e) =>
-                              setMetaForm((f) => ({ ...f, publicationYear: e.target.value }))
-                            }
-                            placeholder="Jahr"
-                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <input
-                            type="text"
-                            value={metaForm.doi}
-                            onChange={(e) => setMetaForm((f) => ({ ...f, doi: e.target.value }))}
-                            placeholder="DOI (z.B. 10.1038/...)"
-                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <input
-                            type="text"
-                            value={metaForm.isbn}
-                            onChange={(e) => setMetaForm((f) => ({ ...f, isbn: e.target.value }))}
-                            placeholder="ISBN-13 / ISBN-10"
-                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <textarea
-                          rows={3}
-                          value={metaForm.abstractText}
-                          onChange={(e) =>
-                            setMetaForm((f) => ({ ...f, abstractText: e.target.value }))
-                          }
-                          placeholder="Abstract / Zusammenfassung…"
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setEditingMetadata(false)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          >
-                            Abbrechen
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={enrichingDoc}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white"
-                          >
-                            Speichern
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="space-y-1.5 text-xs">
-                        {activeDoc.metaTitle && (
-                          <div className="font-semibold text-slate-900 dark:text-slate-100 leading-snug">
-                            {activeDoc.metaTitle}
-                          </div>
-                        )}
-                        {(activeDoc.authors || activeDoc.publicationYear) && (
-                          <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                            {activeDoc.authors}
-                            {activeDoc.authors && activeDoc.publicationYear ? ' • ' : ''}
-                            {activeDoc.publicationYear && (
-                              <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                                {activeDoc.publicationYear}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                          {activeDoc.doi && (
-                            <a
-                              href={`https://doi.org/${encodeURIComponent(activeDoc.doi)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono text-[10px] hover:underline"
-                              title="DOI im Browser öffnen"
-                            >
-                              DOI: {activeDoc.doi}
-                              <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
-                          {activeDoc.isbn && (
-                            <a
-                              href={`https://openlibrary.org/isbn/${encodeURIComponent(activeDoc.isbn)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px] hover:underline"
-                              title="ISBN auf OpenLibrary öffnen"
-                            >
-                              ISBN: {activeDoc.isbn}
-                              <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
-                          {activeDoc.metadataSource && (
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[10px]">
-                              {activeDoc.metadataSource}
-                            </span>
-                          )}
-                        </div>
-
-                        {activeDoc.abstractText && (
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => setShowAbstract((s) => !s)}
-                              className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                              {showAbstract ? 'Abstract ausblenden ▲' : 'Abstract anzeigen ▼'}
-                            </button>
-                            {showAbstract && (
-                              <p className="mt-1.5 p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed max-h-44 overflow-y-auto">
-                                {activeDoc.abstractText}
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {!activeDoc.metaTitle &&
-                          !activeDoc.authors &&
-                          !activeDoc.doi &&
-                          !activeDoc.isbn && (
-                            <p className="text-[11px] text-slate-400">
-                              Noch keine DOI/ISBN-Metadaten hinterlegt. Klicken Sie auf{' '}
-                              <span className="font-medium text-emerald-500">API-Abfrage</span> oder{' '}
-                              <span className="font-medium">Bearbeiten</span>.
-                            </p>
-                          )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Document Tags Section */}
-                  <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <TagIcon className="w-3.5 h-3.5" />
-                        Document Tags
-                      </h4>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tags.length === 0 ? (
-                        <span className="text-xs text-slate-400">
-                          Create tags in the left Tags tab to assign them.
-                        </span>
-                      ) : (
-                        tags.map((tag) => {
-                          const active = activeDoc.tags.some((t) => t.id === tag.id);
-                          return (
-                            <button
-                              key={tag.id}
-                              onClick={() => handleToggleDocTag(tag)}
-                              style={{
-                                borderColor: tag.colorHex,
-                                backgroundColor: active ? tag.colorHex : 'transparent',
-                                color: active ? '#ffffff' : undefined,
-                              }}
-                              className="px-2.5 py-0.5 rounded-full text-xs font-medium border transition hover:scale-105"
-                            >
-                              {tag.name}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Document Reading Notes List */}
-                  <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <BookMarked className="w-3.5 h-3.5 text-amber-500" />
-                      Reading Notes ({docNotes.length})
-                    </h4>
-                    <button
-                      onClick={() => {
-                        setEditingNote(null);
-                        setPendingSelection({
-                          documentId: activeDoc.id,
-                          pageNumber: targetJump?.page || activeDoc.lastReadPage || 1,
-                          selectedText: '',
-                          boundingBox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.16 },
-                        });
-                        setNoteModalOpen(true);
-                      }}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      New Note
-                    </button>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                    {docNotes.length === 0 ? (
-                      <div className="text-center py-12 px-4 space-y-2">
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                          Select any text directly on the PDF page to pop up{' '}
-                          <span className="font-semibold text-amber-500">Add Reading Note</span> with automatic normalized coordinates.
-                        </p>
-                      </div>
-                    ) : (
-                      docNotes.map((note) => (
-                        <div
-                          key={note.id}
-                          onClick={() =>
-                            setTargetJump({
-                              page: note.pageNumber,
-                              noteId: note.id,
-                              timestamp: Date.now(),
-                            })
-                          }
-                          className="cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-slate-50/70 dark:bg-slate-800/50 hover:border-amber-500/70 transition space-y-2"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono text-xs font-semibold">
-                              Page {note.pageNumber}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingNote(note);
-                                  setNoteModalOpen(true);
-                                }}
-                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                                title="Edit Note"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteNote(note.id);
-                                }}
-                                className="p-1 rounded hover:bg-red-500/10 text-slate-400 hover:text-red-500"
-                                title="Delete Note"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {note.selectedText && (
-                            <blockquote className="border-l-2 border-amber-400 pl-2.5 text-xs italic text-slate-600 dark:text-slate-400">
-                              "{note.selectedText}"
-                            </blockquote>
-                          )}
-
-                          <div className="text-xs text-slate-800 dark:text-slate-200 whitespace-pre-line leading-relaxed">
-                            {note.noteMarkdown}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </aside>
+                <RightInspector
+                  activeDoc={activeDoc}
+                  tags={tags}
+                  docNotes={docNotes}
+                  enrichingDoc={enrichingDoc}
+                  onUpdateReadingProgress={handleUpdateReadingProgress}
+                  onEnrichActiveDoc={handleEnrichActiveDoc}
+                  onSaveMetadata={handleSaveMetadata}
+                  onToggleDocTag={handleToggleDocTag}
+                  onOpenNewNoteModal={(pageNumber) => {
+                    setEditingNote(null);
+                    setPendingSelection({
+                      documentId: activeDoc.id,
+                      pageNumber: targetJump?.page || pageNumber || 1,
+                      selectedText: '',
+                      boundingBox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.16 },
+                    });
+                    setNoteModalOpen(true);
+                  }}
+                  onEditNote={(note) => {
+                    setEditingNote(note);
+                    setNoteModalOpen(true);
+                  }}
+                  onDeleteNote={handleDeleteNote}
+                  onSelectNote={(note) => {
+                    setTargetJump({
+                      page: note.pageNumber,
+                      noteId: note.id,
+                      timestamp: Date.now(),
+                    });
+                  }}
+                />
               )}
             </>
           ) : (
@@ -2969,285 +2002,16 @@ export const App: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {documents.map((doc) => {
-                    const docWithCacheKey =
-                      coverCacheVersion > 0
-                        ? { ...doc, lastModifiedFs: `${doc.lastModifiedFs}-v${coverCacheVersion}` }
-                        : doc;
-                    const pct = Math.min(
-                      100,
-                      Math.max(
-                        0,
-                        Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100)
-                      )
-                    );
-
-                    if (settings.showCovers && settings.coverLayout === 'top') {
-                      return (
-                        <div
-                          key={doc.id}
-                          onClick={() => handleOpenDocument(doc.id)}
-                          className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex flex-col justify-between"
-                        >
-                          <DocumentCover
-                            document={docWithCacheKey}
-                            className="w-full h-56 border-b border-slate-100 dark:border-slate-800 group-hover:scale-[1.01] transition-transform"
-                          />
-                          <div className="p-4 flex-1 flex flex-col justify-between gap-3">
-                            <div className="space-y-2">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <h3
-                                    className="font-semibold text-sm text-slate-900 dark:text-slate-100 group-hover:text-blue-500 transition line-clamp-2 break-words"
-                                    title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
-                                  >
-                                    {doc.metaTitle || doc.fileName}
-                                  </h3>
-                                  {(doc.authors || doc.publicationYear) && (
-                                    <p className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">
-                                      {doc.authors}
-                                      {doc.authors && doc.publicationYear ? ' • ' : ''}
-                                      {doc.publicationYear && (
-                                        <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                                          {doc.publicationYear}
-                                        </span>
-                                      )}
-                                    </p>
-                                  )}
-                                  <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                                    {doc.relativePath}
-                                  </p>
-                                </div>
-                                <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0 mt-0.5" />
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-1 pt-1">
-                                {renderStatusBadge(doc)}
-                                {(doc.noteCount ?? 0) > 0 && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                                    <BookMarked className="w-3 h-3" />
-                                    {doc.noteCount} {doc.noteCount === 1 ? 'Notiz' : 'Notizen'}
-                                  </span>
-                                )}
-                                {doc.doi && (
-                                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
-                                    DOI
-                                  </span>
-                                )}
-                                {doc.isbn && (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
-                                    ISBN
-                                  </span>
-                                )}
-                                {doc.tags.map((t) => (
-                                  <span
-                                    key={t.id}
-                                    style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                    className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                                  >
-                                    #{t.name}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                              {doc.readingStatus === 'READING' && (
-                                <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                                  <div
-                                    className="h-full bg-amber-500 rounded-full"
-                                    style={{ width: `${pct}%` }}
-                                  />
-                                </div>
-                              )}
-                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                                <span className="font-mono">{doc.pageCount} pages</span>
-                                <span className="font-mono">
-                                  {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    if (settings.showCovers) {
-                      return (
-                        <div
-                          key={doc.id}
-                          onClick={() => handleOpenDocument(doc.id)}
-                          className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex gap-3.5"
-                        >
-                          <DocumentCover
-                            document={docWithCacheKey}
-                            className="w-24 sm:w-28 aspect-[3/4] shrink-0 rounded-lg border border-slate-200/80 dark:border-slate-800 shadow-xs group-hover:scale-[1.02] transition-transform"
-                          />
-
-                          <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
-                            <div className="space-y-1.5">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <h3
-                                    className="font-semibold text-sm text-slate-900 dark:text-slate-100 group-hover:text-blue-500 transition line-clamp-2 break-words"
-                                    title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
-                                  >
-                                    {doc.metaTitle || doc.fileName}
-                                  </h3>
-                                  {(doc.authors || doc.publicationYear) && (
-                                    <p className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">
-                                      {doc.authors}
-                                      {doc.authors && doc.publicationYear ? ' • ' : ''}
-                                      {doc.publicationYear && (
-                                        <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                                          {doc.publicationYear}
-                                        </span>
-                                      )}
-                                    </p>
-                                  )}
-                                  <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                                    {doc.relativePath}
-                                  </p>
-                                </div>
-                                <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0 mt-0.5" />
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                                {renderStatusBadge(doc)}
-                                {(doc.noteCount ?? 0) > 0 && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                                    <BookMarked className="w-3 h-3" />
-                                    {doc.noteCount} {doc.noteCount === 1 ? 'Notiz' : 'Notizen'}
-                                  </span>
-                                )}
-                                {doc.doi && (
-                                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
-                                    DOI
-                                  </span>
-                                )}
-                                {doc.isbn && (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
-                                    ISBN
-                                  </span>
-                                )}
-                                {doc.tags.map((t) => (
-                                  <span
-                                    key={t.id}
-                                    style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                    className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                                  >
-                                    #{t.name}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                              {doc.readingStatus === 'READING' && (
-                                <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                                  <div
-                                    className="h-full bg-amber-500 rounded-full"
-                                    style={{ width: `${pct}%` }}
-                                  />
-                                </div>
-                              )}
-                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                                <span className="font-mono">{doc.pageCount} pages</span>
-                                <span className="font-mono">
-                                  {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={doc.id}
-                        onClick={() => handleOpenDocument(doc.id)}
-                        className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex flex-col justify-between gap-3"
-                      >
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between gap-2.5">
-                            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
-                              <FileText className="w-5 h-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3
-                                className="font-semibold text-sm text-slate-900 dark:text-slate-100 group-hover:text-blue-500 transition line-clamp-2 break-words"
-                                title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
-                              >
-                                {doc.metaTitle || doc.fileName}
-                              </h3>
-                              {(doc.authors || doc.publicationYear) && (
-                                <p className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">
-                                  {doc.authors}
-                                  {doc.authors && doc.publicationYear ? ' • ' : ''}
-                                  {doc.publicationYear && (
-                                    <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                                      {doc.publicationYear}
-                                    </span>
-                                  )}
-                                </p>
-                              )}
-                              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                                {doc.relativePath}
-                              </p>
-                            </div>
-                            <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0" />
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-1 pt-1">
-                            {renderStatusBadge(doc)}
-                            {(doc.noteCount ?? 0) > 0 && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                                <BookMarked className="w-3 h-3" />
-                                {doc.noteCount} {doc.noteCount === 1 ? 'Notiz' : 'Notizen'}
-                              </span>
-                            )}
-                            {doc.doi && (
-                              <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
-                                DOI
-                              </span>
-                            )}
-                            {doc.isbn && (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">
-                                ISBN
-                              </span>
-                            )}
-                            {doc.tags.map((t) => (
-                              <span
-                                key={t.id}
-                                style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                              >
-                                #{t.name}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
-                          {doc.readingStatus === 'READING' && (
-                            <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                              <div
-                                className="h-full bg-amber-500 rounded-full"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                            <span className="font-mono">{doc.pageCount} pages</span>
-                            <span className="font-mono">
-                              {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {documents.map((doc) => (
+                    <DocumentCard
+                      key={doc.id}
+                      document={doc}
+                      coverCacheVersion={coverCacheVersion}
+                      showCovers={settings.showCovers}
+                      coverLayout={settings.coverLayout}
+                      onClick={() => handleOpenDocument(doc.id)}
+                    />
+                  ))}
                 </div>
               )}
             </div>
