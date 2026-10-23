@@ -51,9 +51,9 @@ pdforever/
 │   │   │   ├── config/             # LibraryProperties (@ConfigurationProperties("library")), WebConfig
 │   │   │   ├── controller/         # DocumentController, SearchController, NoteAndTagController
 │   │   │   ├── domain/             # JPA Entities: Document, Tag, ReadingNote
-│   │   │   ├── dto/                # Java records for REST requests/responses (DocumentDto, TocItemDto, UpdateReadingProgressRequest, etc.)
+│   │   │   ├── dto/                # Java records for REST requests/responses (DocumentDto, TocItemDto, UpdateMetadataRequest, etc.)
 │   │   │   ├── repository/         # Spring Data JPA repositories
-│   │   │   └── service/            # DirectoryScannerService, FileWatcherService, PdfExtractionService,
+│   │   │   └── service/            # DirectoryScannerService, FileWatcherService, PdfExtractionService, MetadataEnrichmentService,
 │   │   │                           # LuceneIndexService, SearchService, LibraryManagementService, FileNameCleaner
 │   │   └── resources/
 │   │       └── application.yml     # App, SQLite, and library.* configuration
@@ -120,6 +120,11 @@ Run from the repository root:
    - `Document` tracks `readingStatus` (`UNREAD`, `READING`, `COMPLETED`), `lastReadPage` (1-based), and `lastOpenedAt`.
    - Keep new columns on existing entities nullable in SQLite (with non-null Java defaults in getters) so Hibernate `ddl-auto: update` can execute `ALTER TABLE ... ADD COLUMN` cleanly on existing databases.
    - Endpoints: `PUT /api/documents/{id}/progress`, `GET /api/documents/recent`, and `GET /api/documents?status=...`.
+8. **Automatic Metadata Enrichment (`MetadataEnrichmentService`)**:
+   - Strictly non-destructive (never modifies PDF files on disk).
+   - Automatically parses the first 1–3 pages (plus filename and `PDDocumentInformation`) for DOIs and checksum-validated ISBN-13 / ISBN-10 identifiers.
+   - Queries free open APIs (**CrossRef**, **Semantic Scholar**, **OpenLibrary**) for `metaTitle`, `authors`, `publicationYear`, and `abstractText` (configurable via `library.metadata-lookup-enabled` in `application.yml`).
+   - Endpoints: `POST /api/documents/{id}/enrich`, `PUT /api/documents/{id}/metadata`, and `POST /api/documents/enrich-all?force=...`.
 
 ### Frontend Rules
 1. **Build Artifacts**:

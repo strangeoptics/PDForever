@@ -1,12 +1,14 @@
 import {
   CreateNotePayload,
   DocumentItem,
+  MetadataEnrichmentReport,
   PaginatedResponse,
   ReadingNote,
   SearchResultGroup,
   Tag,
   TocItem,
   TreeNode,
+  UpdateMetadataPayload,
   UpdateNotePayload,
   UpdateReadingProgressPayload,
 } from './types';
@@ -64,6 +66,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }).then(handleJson<DocumentItem>);
+  },
+
+  enrichDocumentMetadata(id: string): Promise<DocumentItem> {
+    return fetch(`${API_BASE}/documents/${id}/enrich`, {
+      method: 'POST',
+    }).then(handleJson<DocumentItem>);
+  },
+
+  updateDocumentMetadata(id: string, payload: UpdateMetadataPayload): Promise<DocumentItem> {
+    return fetch(`${API_BASE}/documents/${id}/metadata`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(handleJson<DocumentItem>);
+  },
+
+  enrichAllDocuments(force = false): Promise<MetadataEnrichmentReport> {
+    return fetch(`${API_BASE}/documents/enrich-all?force=${force}`, {
+      method: 'POST',
+    }).then(handleJson<MetadataEnrichmentReport>);
   },
 
   getStreamUrl(id: string): string {

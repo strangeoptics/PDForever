@@ -56,6 +56,30 @@ public class Document {
     @Column(name = "last_opened_at")
     private Instant lastOpenedAt;
 
+    @Column(name = "doi", length = 128)
+    private String doi;
+
+    @Column(name = "isbn", length = 32)
+    private String isbn;
+
+    @Column(name = "meta_title", length = 512)
+    private String metaTitle;
+
+    @Column(name = "authors", length = 512)
+    private String authors;
+
+    @Column(name = "publication_year")
+    private Integer publicationYear;
+
+    @Column(name = "abstract_text", columnDefinition = "TEXT")
+    private String abstractText;
+
+    @Column(name = "metadata_source", length = 64)
+    private String metadataSource;
+
+    @Column(name = "metadata_enriched_at")
+    private Instant metadataEnrichedAt;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "document_tags",
@@ -160,6 +184,70 @@ public class Document {
 
     public void setLastOpenedAt(Instant lastOpenedAt) {
         this.lastOpenedAt = lastOpenedAt;
+    }
+
+    public String getDoi() {
+        return doi;
+    }
+
+    public void setDoi(String doi) {
+        this.doi = doi;
+    }
+
+    public String getIsbn() {
+        return isbn;
+    }
+
+    public void setIsbn(String isbn) {
+        this.isbn = isbn;
+    }
+
+    public String getMetaTitle() {
+        return metaTitle;
+    }
+
+    public void setMetaTitle(String metaTitle) {
+        this.metaTitle = metaTitle;
+    }
+
+    public String getAuthors() {
+        return authors;
+    }
+
+    public void setAuthors(String authors) {
+        this.authors = authors;
+    }
+
+    public Integer getPublicationYear() {
+        return publicationYear;
+    }
+
+    public void setPublicationYear(Integer publicationYear) {
+        this.publicationYear = publicationYear;
+    }
+
+    public String getAbstractText() {
+        return abstractText;
+    }
+
+    public void setAbstractText(String abstractText) {
+        this.abstractText = abstractText;
+    }
+
+    public String getMetadataSource() {
+        return metadataSource;
+    }
+
+    public void setMetadataSource(String metadataSource) {
+        this.metadataSource = metadataSource;
+    }
+
+    public Instant getMetadataEnrichedAt() {
+        return metadataEnrichedAt;
+    }
+
+    public void setMetadataEnrichedAt(Instant metadataEnrichedAt) {
+        this.metadataEnrichedAt = metadataEnrichedAt;
     }
 
     public Set<Tag> getTags() {

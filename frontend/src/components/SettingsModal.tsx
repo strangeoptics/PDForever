@@ -13,6 +13,8 @@ import {
   Check,
   LayoutGrid,
   Columns,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { api } from '../api';
@@ -25,6 +27,7 @@ interface SettingsModalProps {
   onToggleDarkMode: (dark: boolean) => void;
   onClose: () => void;
   onCoversCleared?: () => void;
+  onMetadataEnriched?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -35,9 +38,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleDarkMode,
   onClose,
   onCoversCleared,
+  onMetadataEnriched,
 }) => {
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheMessage, setCacheMessage] = useState<string | null>(null);
+  const [enrichingAll, setEnrichingAll] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -52,6 +58,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setCacheMessage('Cover-Cache konnte nicht geleert werden.');
     } finally {
       setClearingCache(false);
+    }
+  };
+
+  const handleEnrichAll = async (force: boolean) => {
+    setEnrichingAll(true);
+    setEnrichMessage(null);
+    try {
+      const res = await api.enrichAllDocuments(force);
+      setEnrichMessage(
+        `${res.scanned} PDFs geprüft • ${res.identifiersDetected} DOIs/ISBNs erkannt • ${res.enriched} Dokumente angereichert.`
+      );
+      onMetadataEnriched?.();
+    } catch {
+      setEnrichMessage('Metadaten-Anreicherung konnte nicht durchgeführt werden.');
+    } finally {
+      setEnrichingAll(false);
     }
   };
 
@@ -321,6 +343,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Buchmodus
                   </button>
                 </div>
+              </div>
+            </div>
+          </section>
+          {/* Section 3: Automatische Metadaten-Anreicherung (DOI & ISBN) */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+              Automatische Metadaten-Anreicherung (DOI & ISBN)
+            </h3>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 p-4 space-y-3">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  DOI- & ISBN-Erkennung über CrossRef, Semantic Scholar & OpenLibrary
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Analysiert automatisch die ersten 2–3 Seiten jedes PDFs nach DOIs und ISBNs (ohne die PDF-Dateien auf der Festplatte zu verändern) und lädt Titel, Autoren, Publikationsjahr und Abstract.
+                </p>
+              </div>
+
+              {enrichMessage && (
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-500/10 px-3 py-2 rounded-lg">
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>{enrichMessage}</span>
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleEnrichAll(false)}
+                  disabled={enrichingAll}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition shadow-xs"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${enrichingAll ? 'animate-spin' : ''}`} />
+                  {enrichingAll ? 'Analysiere & frage APIs ab…' : 'Fehlende Metadaten anreichern'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEnrichAll(true)}
+                  disabled={enrichingAll}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-50 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${enrichingAll ? 'animate-spin' : ''}`} />
+                  Alle PDFs neu scannen
+                </button>
               </div>
             </div>
           </section>

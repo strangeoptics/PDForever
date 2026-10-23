@@ -7,6 +7,7 @@ import com.pdforever.repository.DocumentRepository;
 import com.pdforever.service.DirectoryScannerService;
 import com.pdforever.service.FileWatcherService;
 import com.pdforever.service.LibraryManagementService;
+import com.pdforever.service.MetadataEnrichmentService;
 import com.pdforever.service.SearchService;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -55,6 +56,7 @@ class IngestionAndSearchIntegrationTest {
         registry.add("library.lucene-dir", luceneDir::toString);
         registry.add("library.covers-dir", coversDir::toString);
         registry.add("library.watcher-enabled", () -> "false");
+        registry.add("library.metadata-lookup-enabled", () -> "false");
         registry.add("library.debounce-ms", () -> "100");
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + dbFile.toAbsolutePath() + "?journal_mode=WAL&foreign_keys=on");
     }
@@ -78,6 +80,9 @@ class IngestionAndSearchIntegrationTest {
     private com.pdforever.service.FileNameCleaner fileNameCleaner;
 
     @Autowired
+    private MetadataEnrichmentService metadataEnrichmentService;
+
+    @Autowired
     private LibraryProperties libraryProperties;
 
     @Autowired
@@ -89,10 +94,10 @@ class IngestionAndSearchIntegrationTest {
         Path scienceDir = rootDir.resolve("Science/Physics");
         Files.createDirectories(scienceDir);
 
-        // 1. Create a valid 2-page PDF in Science/Physics/quantum_computing.pdf
+        // 1. Create a valid 2-page PDF in Science/Physics/quantum_computing.pdf with DOI and ISBN on page 1
         Path pdfFile = scienceDir.resolve("quantum_computing.pdf");
         createSamplePdf(pdfFile, List.of(
-                "Page one introduces quantum superposition and entanglement in superconducting qubits.",
+                "Page one introduces quantum superposition and entanglement in superconducting qubits. DOI: 10.1038/s41586-019-1666-5 ISBN 978-3-496-01666-3",
                 "Page two discusses Shor algorithm and fault-tolerant topological quantum error correction."
         ));
 
@@ -110,6 +115,55 @@ class IngestionAndSearchIntegrationTest {
         Document savedDoc = documentRepository.findByRelativePath("Science/Physics/quantum_computing.pdf").orElseThrow();
         assertThat(savedDoc.getPageCount()).isEqualTo(2);
         assertThat(savedDoc.isDeleted()).isFalse();
+        assertThat(savedDoc.getDoi()).isEqualTo("10.1038/s41586-019-1666-5");
+        assertThat(savedDoc.getIsbn()).isEqualTo("9783496016663");
+
+        // 2b. Verify manual metadata update and API response parsers
+        DocumentDto updatedMeta = libraryService.updateDocumentMetadata(
+                savedDoc.getId(),
+                new UpdateMetadataRequest(
+                        "10.1038/s41586-019-1666-5",
+                        "9783496016663",
+                        "Quantum Supremacy Using a Programmable Superconducting Processor",
+                        "Frank Arute, Kunal Arya, Ryan Babbush",
+                        2019,
+                        "The promise of quantum computers is that certain computational tasks might be executed exponentially faster."
+                )
+        );
+        assertThat(updatedMeta.metaTitle()).isEqualTo("Quantum Supremacy Using a Programmable Superconducting Processor");
+        assertThat(updatedMeta.authors()).isEqualTo("Frank Arute, Kunal Arya, Ryan Babbush");
+        assertThat(updatedMeta.publicationYear()).isEqualTo(2019);
+        assertThat(updatedMeta.metadataSource()).isEqualTo("MANUAL");
+
+        var crossRefParsed = metadataEnrichmentService.parseCrossRefJson("10.1038/test", """
+                {
+                  "message": {
+                    "title": ["Attention Is All You Need"],
+                    "author": [{"given": "Ashish", "family": "Vaswani"}, {"given": "Noam", "family": "Shazeer"}],
+                    "issued": {"date-parts": [[2017, 6, 12]]},
+                    "abstract": "<jats:p>The dominant sequence transduction models are based on complex recurrent neural networks.</jats:p>"
+                  }
+                }
+                """).orElseThrow();
+        assertThat(crossRefParsed.title()).isEqualTo("Attention Is All You Need");
+        assertThat(crossRefParsed.authors()).isEqualTo("Ashish Vaswani, Noam Shazeer");
+        assertThat(crossRefParsed.publicationYear()).isEqualTo(2017);
+        assertThat(crossRefParsed.abstractText()).isEqualTo("The dominant sequence transduction models are based on complex recurrent neural networks.");
+
+        var openLibParsed = metadataEnrichmentService.parseOpenLibraryJson("9783496016663", """
+                {
+                  "ISBN:9783496016663": {
+                    "title": "Ethnologie",
+                    "subtitle": "Biographie einer Kulturwissenschaft",
+                    "authors": [{"name": "Roman Loimeier"}],
+                    "publish_date": "Berlin, 2021",
+                    "notes": "Comprehensive history of cultural anthropology."
+                  }
+                }
+                """).orElseThrow();
+        assertThat(openLibParsed.title()).isEqualTo("Ethnologie — Biographie einer Kulturwissenschaft");
+        assertThat(openLibParsed.authors()).isEqualTo("Roman Loimeier");
+        assertThat(openLibParsed.publicationYear()).isEqualTo(2021);
 
         // 3. Search page-indexed Lucene documents with UnifiedHighlighter snippet highlighting
         List<SearchResultGroupDto> results = searchService.search("superconducting");

@@ -28,6 +28,21 @@ export interface UpdateReadingProgressPayload {
   readingStatus?: ReadingStatus;
 }
 
+export interface UpdateMetadataPayload {
+  doi?: string;
+  isbn?: string;
+  metaTitle?: string;
+  authors?: string;
+  publicationYear?: number | null;
+  abstractText?: string;
+}
+
+export interface MetadataEnrichmentReport {
+  scanned: number;
+  identifiersDetected: number;
+  enriched: number;
+}
+
 export interface DocumentItem {
   id: string;
   relativePath: string;
@@ -40,6 +55,14 @@ export interface DocumentItem {
   readingStatus: ReadingStatus;
   lastReadPage: number;
   lastOpenedAt: string | null;
+  doi?: string | null;
+  isbn?: string | null;
+  metaTitle?: string | null;
+  authors?: string | null;
+  publicationYear?: number | null;
+  abstractText?: string | null;
+  metadataSource?: string | null;
+  metadataEnrichedAt?: string | null;
 }
 
 export interface PaginatedResponse<T> {

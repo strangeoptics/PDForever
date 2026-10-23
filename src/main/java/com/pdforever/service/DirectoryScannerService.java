@@ -29,19 +29,22 @@ public class DirectoryScannerService {
     private final PdfExtractionService pdfExtractionService;
     private final LuceneIndexService luceneIndexService;
     private final FileNameCleaner fileNameCleaner;
+    private final MetadataEnrichmentService metadataEnrichmentService;
 
     public DirectoryScannerService(
             LibraryProperties properties,
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
             LuceneIndexService luceneIndexService,
-            FileNameCleaner fileNameCleaner
+            FileNameCleaner fileNameCleaner,
+            MetadataEnrichmentService metadataEnrichmentService
     ) {
         this.properties = properties;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
         this.luceneIndexService = luceneIndexService;
         this.fileNameCleaner = fileNameCleaner;
+        this.metadataEnrichmentService = metadataEnrichmentService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -161,6 +164,7 @@ public class DirectoryScannerService {
                 existing.setPageCount(extracted.pageCount());
                 existing.setLastModifiedFs(lastModifiedFs);
                 existing.setDeleted(false);
+                metadataEnrichmentService.enrichDocument(existing, filePath, extracted.pageTexts(), false);
                 Document saved = documentRepository.save(existing);
 
                 deleteCachedCover(saved.getId());
@@ -182,6 +186,7 @@ public class DirectoryScannerService {
                 newDoc.setLastModifiedFs(lastModifiedFs);
                 newDoc.setCreatedAt(Instant.now());
                 newDoc.setDeleted(false);
+                metadataEnrichmentService.enrichDocument(newDoc, filePath, extracted.pageTexts(), false);
 
                 Document saved = documentRepository.save(newDoc);
                 luceneIndexService.indexDocumentPages(saved, extracted.pageTexts());

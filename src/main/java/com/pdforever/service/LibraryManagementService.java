@@ -35,6 +35,7 @@ public class LibraryManagementService {
     private final ReadingNoteRepository noteRepository;
     private final DirectoryScannerService scannerService;
     private final PdfExtractionService pdfExtractionService;
+    private final MetadataEnrichmentService metadataEnrichmentService;
     private final ObjectMapper objectMapper;
 
     public LibraryManagementService(
@@ -43,6 +44,7 @@ public class LibraryManagementService {
             ReadingNoteRepository noteRepository,
             DirectoryScannerService scannerService,
             PdfExtractionService pdfExtractionService,
+            MetadataEnrichmentService metadataEnrichmentService,
             ObjectMapper objectMapper
     ) {
         this.documentRepository = documentRepository;
@@ -50,6 +52,7 @@ public class LibraryManagementService {
         this.noteRepository = noteRepository;
         this.scannerService = scannerService;
         this.pdfExtractionService = pdfExtractionService;
+        this.metadataEnrichmentService = metadataEnrichmentService;
         this.objectMapper = objectMapper;
     }
 
@@ -297,6 +300,81 @@ public class LibraryManagementService {
                 .toList();
     }
 
+    @Transactional
+    public DocumentDto enrichDocumentMetadata(UUID id) {
+        Document doc = findActiveDocumentOrThrow(id);
+        Path pdfPath = getDocumentFilePath(id);
+        metadataEnrichmentService.enrichDocument(doc, pdfPath, null, true);
+        Document saved = documentRepository.save(doc);
+        return toDocumentDto(saved);
+    }
+
+    @Transactional
+    public DocumentDto updateDocumentMetadata(UUID id, UpdateMetadataRequest request) {
+        Document doc = findActiveDocumentOrThrow(id);
+        if (request.doi() != null) {
+            doc.setDoi(request.doi().isBlank() ? null : request.doi().strip());
+        }
+        if (request.isbn() != null) {
+            doc.setIsbn(request.isbn().isBlank() ? null : request.isbn().replaceAll("[\\s\\-\u2010-\u2015]", "").toUpperCase(Locale.ROOT));
+        }
+        if (request.metaTitle() != null) {
+            doc.setMetaTitle(request.metaTitle().isBlank() ? null : request.metaTitle().strip());
+        }
+        if (request.authors() != null) {
+            doc.setAuthors(request.authors().isBlank() ? null : request.authors().strip());
+        }
+        if (request.publicationYear() != null) {
+            doc.setPublicationYear(request.publicationYear() > 0 ? request.publicationYear() : null);
+        }
+        if (request.abstractText() != null) {
+            doc.setAbstractText(request.abstractText().isBlank() ? null : request.abstractText().strip());
+        }
+        doc.setMetadataSource("MANUAL");
+        doc.setMetadataEnrichedAt(Instant.now());
+
+        // If user provided a new DOI or ISBN and left title empty, optionally fetch via API
+        if ((doc.getMetaTitle() == null || doc.getMetaTitle().isBlank()) && (doc.getDoi() != null || doc.getIsbn() != null)) {
+            Path pdfPath = getDocumentFilePath(id);
+            metadataEnrichmentService.enrichDocument(doc, pdfPath, null, true);
+        }
+
+        Document saved = documentRepository.save(doc);
+        return toDocumentDto(saved);
+    }
+
+    public MetadataEnrichmentReportDto enrichAllDocuments(boolean force) {
+        List<Document> activeDocs = documentRepository.findAllByIsDeletedFalseOrderByRelativePathAsc();
+        int scanned = 0;
+        int identifiersDetected = 0;
+        int enriched = 0;
+
+        for (Document doc : activeDocs) {
+            if (!force && doc.getMetadataEnrichedAt() != null && !"MANUAL".equalsIgnoreCase(doc.getMetadataSource())) {
+                if (doc.getMetaTitle() != null && !doc.getMetaTitle().isBlank()) {
+                    continue;
+                }
+            }
+            if ("MANUAL".equalsIgnoreCase(doc.getMetadataSource()) && !force) {
+                continue;
+            }
+            Path fullPath = scannerService.getRootPath().resolve(doc.getRelativePath()).normalize();
+            if (!fullPath.startsWith(scannerService.getRootPath()) || !Files.exists(fullPath)) {
+                continue;
+            }
+            scanned++;
+            boolean changed = metadataEnrichmentService.enrichDocument(doc, fullPath, null, force);
+            if (doc.getDoi() != null || doc.getIsbn() != null) {
+                identifiersDetected++;
+            }
+            if (changed) {
+                documentRepository.save(doc);
+                enriched++;
+            }
+        }
+        return new MetadataEnrichmentReportDto(scanned, identifiersDetected, enriched);
+    }
+
     private Document findActiveDocumentOrThrow(UUID id) {
         return documentRepository.findById(id)
                 .filter(d -> !d.isDeleted())
@@ -319,7 +397,15 @@ public class LibraryManagementService {
                 sortedTags,
                 doc.getReadingStatus(),
                 doc.getLastReadPage(),
-                doc.getLastOpenedAt()
+                doc.getLastOpenedAt(),
+                doc.getDoi(),
+                doc.getIsbn(),
+                doc.getMetaTitle(),
+                doc.getAuthors(),
+                doc.getPublicationYear(),
+                doc.getAbstractText(),
+                doc.getMetadataSource(),
+                doc.getMetadataEnrichedAt()
         );
     }
 

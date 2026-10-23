@@ -15,7 +15,15 @@ public record DocumentDto(
         List<TagDto> tags,
         String readingStatus,
         Integer lastReadPage,
-        Instant lastOpenedAt
+        Instant lastOpenedAt,
+        String doi,
+        String isbn,
+        String metaTitle,
+        String authors,
+        Integer publicationYear,
+        String abstractText,
+        String metadataSource,
+        Instant metadataEnrichedAt
 ) {
 }
 

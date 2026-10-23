@@ -1,8 +1,10 @@
 package com.pdforever.controller;
 
 import com.pdforever.dto.DocumentDto;
+import com.pdforever.dto.MetadataEnrichmentReportDto;
 import com.pdforever.dto.TocItemDto;
 import com.pdforever.dto.TreeNodeDto;
+import com.pdforever.dto.UpdateMetadataRequest;
 import com.pdforever.dto.UpdateReadingProgressRequest;
 import com.pdforever.service.DirectoryScannerService;
 import com.pdforever.service.LibraryManagementService;
@@ -86,6 +88,26 @@ public class DocumentController {
             @RequestBody UpdateReadingProgressRequest request
     ) {
         return libraryService.updateReadingProgress(id, request);
+    }
+
+    @PostMapping("/documents/{id}/enrich")
+    public DocumentDto enrichDocumentMetadata(@PathVariable UUID id) {
+        return libraryService.enrichDocumentMetadata(id);
+    }
+
+    @PutMapping("/documents/{id}/metadata")
+    public DocumentDto updateDocumentMetadata(
+            @PathVariable UUID id,
+            @RequestBody UpdateMetadataRequest request
+    ) {
+        return libraryService.updateDocumentMetadata(id, request);
+    }
+
+    @PostMapping("/documents/enrich-all")
+    public MetadataEnrichmentReportDto enrichAllDocuments(
+            @RequestParam(defaultValue = "false") boolean force
+    ) {
+        return libraryService.enrichAllDocuments(force);
     }
 
     /**
