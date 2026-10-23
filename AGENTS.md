@@ -17,14 +17,14 @@
 - **Language & Runtime**: Java 21 (Virtual Threads enabled: `spring.threads.virtual.enabled=true`)
 - **Framework**: Spring Boot 3.3.5 (`spring-boot-starter-web`, `spring-boot-starter-data-jpa`, `spring-boot-starter-validation`)
 - **Database**: SQLite (`org.xerial:sqlite-jdbc` + `org.hibernate.community.dialect.SQLiteDialect`) in `WAL` mode (`./data/pdforever.db`)
-- **PDF Processing**: Apache PDFBox 3.0.3 (`Loader.loadPDF`, `PDFTextStripper`, `PDFRenderer`)
+- **PDF Processing**: Apache PDFBox 3.0.3 (`Loader.loadPDF`, `PDFTextStripper`, `PDFRenderer`, `PDDocumentOutline`)
 - **Fulltext Search**: Embedded Apache Lucene 9.11.1 (`StandardAnalyzer`, `BM25Similarity`, `UnifiedHighlighter`) in `./data/lucene-index`
 
 ### Frontend (`/frontend`)
 - **Framework**: React 18 + TypeScript 5 + Vite 5
 - **Styling**: Tailwind CSS 3 (dark mode via `.dark` class on `<html>`)
 - **Icons**: `lucide-react`
-- **PDF Rendering**: `pdfjs-dist` (Mozilla PDF.js v4) with HTTP 206 Byte-Range chunked streaming and selectable `TextLayer`
+- **PDF Rendering**: `pdfjs-dist` (Mozilla PDF.js v4) with HTTP 206 Byte-Range chunked streaming, selectable `TextLayer`, and 4 view modes (`continuous`, `single`, `spread`, `book`)
 
 ---
 
@@ -37,11 +37,12 @@ pdforever/
 │   │   ├── components/
 │   │   │   ├── DocumentCover.tsx   # Lazy-loaded cover thumbnail (Backend JPEG + PDF.js fallback)
 │   │   │   ├── NoteModal.tsx       # Create/edit ReadingNote (Lesezettel) modal
-│   │   │   ├── PdfViewer.tsx       # Continuous & single-page PDF.js viewer + text selection hook
+│   │   │   ├── PdfViewer.tsx       # PDF.js viewer (continuous, single, 2-page spread, book mode) + TocTreeNode + text selection hook
 │   │   │   └── SettingsModal.tsx   # User settings dialog (Cover toggle/layout, theme, reader defaults)
-│   │   ├── App.tsx                 # Main 3-panel workspace (Sidebar, Document Explorer / Reader, Inspector)
+│   │   ├── App.tsx                 # Main workspace: Horizontally resizable Left Sidebar (Folders, Gliederung/TOC, Tags, Notes),
+│   │   │                           # Continue Reading shelf, Single & Split-View PDF Reader, and Right Inspector
 │   │   ├── api.ts                  # Typed REST client for /api/*
-│   │   └── types.ts                # Shared TypeScript interfaces (DocumentItem, ReadingNote, AppSettings, etc.)
+│   │   └── types.ts                # Shared TypeScript interfaces (DocumentItem, TocItem, ReadingStatus, ReaderViewMode, etc.)
 │   ├── package.json
 │   └── vite.config.ts              # Proxies /api to localhost:8080; builds into ../src/main/resources/static
 ├── src/
@@ -50,7 +51,7 @@ pdforever/
 │   │   │   ├── config/             # LibraryProperties (@ConfigurationProperties("library")), WebConfig
 │   │   │   ├── controller/         # DocumentController, SearchController, NoteAndTagController
 │   │   │   ├── domain/             # JPA Entities: Document, Tag, ReadingNote
-│   │   │   ├── dto/                # Java records for REST requests/responses
+│   │   │   ├── dto/                # Java records for REST requests/responses (DocumentDto, TocItemDto, UpdateReadingProgressRequest, etc.)
 │   │   │   ├── repository/         # Spring Data JPA repositories
 │   │   │   └── service/            # DirectoryScannerService, FileWatcherService, PdfExtractionService,
 │   │   │                           # LuceneIndexService, SearchService, LibraryManagementService, FileNameCleaner
@@ -59,6 +60,7 @@ pdforever/
 │   └── test/
 │       └── java/com/pdforever/
 │           └── IngestionAndSearchIntegrationTest.java
+├── analysis/                       # Git-ignored feature & architecture analysis documents
 ├── data/                           # Git-ignored runtime data (pdforever.db, lucene-index/, covers/)
 └── storage/                        # Git-ignored in-place PDF library root
 ```
@@ -111,6 +113,13 @@ Run from the repository root:
 5. **Lucene Page-Level Index**:
    - Each PDF page is indexed as a separate Lucene document containing `docId` (`StringField`), `pageKey` (`StringField`), `relPath` (`StoredField`), `pageNumber` (`IntPoint` + `StoredField`), and `content` (`Field` with `IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS` and stored term vectors for fast `UnifiedHighlighter` snippets).
    - When re-indexing or deleting a document, always purge existing page documents by `new Term("docId", docId.toString())`.
+6. **PDF Bookmarks / Table of Contents (`GET /api/documents/{id}/outline`)**:
+   - Extracted non-destructively on demand via `PdfExtractionService.extractOutline(Path)` using Apache PDFBox `PDDocumentOutline` and `PDOutlineItem`.
+   - Always guard recursive outline traversal with a visited `Set<COSBase>` and a maximum depth (`depth <= 8`) to prevent infinite loops on malformed PDFs, resolving destinations to 1-based page numbers (`TocItemDto`).
+7. **Reading Progress & Status Tracking**:
+   - `Document` tracks `readingStatus` (`UNREAD`, `READING`, `COMPLETED`), `lastReadPage` (1-based), and `lastOpenedAt`.
+   - Keep new columns on existing entities nullable in SQLite (with non-null Java defaults in getters) so Hibernate `ddl-auto: update` can execute `ALTER TABLE ... ADD COLUMN` cleanly on existing databases.
+   - Endpoints: `PUT /api/documents/{id}/progress`, `GET /api/documents/recent`, and `GET /api/documents?status=...`.
 
 ### Frontend Rules
 1. **Build Artifacts**:
@@ -118,7 +127,11 @@ Run from the repository root:
    - Always run `npm run build` in `frontend/` after making TypeScript/React changes to verify strict `tsc -b` compilation and update the static bundle served by Spring Boot.
 2. **Normalized Coordinates for Reading Notes (`Lesezettel`)**:
    - Highlight bounding boxes (`BoundingBox: { x1, y1, x2, y2 }`) are stored normalized in the range `0.0` to `1.0` relative to the page's width and height so overlays scale accurately at any zoom level.
-3. **User Settings (`AppSettings`)**:
+3. **Reader View Modes, Split-View & Resizable Sidebar**:
+   - `ReaderViewMode` supports `'continuous'` (fortlaufend), `'single'` (Einzelseite), `'spread'` (Doppelseite: `1–2`, `3–4`, …), and `'book'` (Buchmodus: Deckblatt Seite `1` einzeln, danach Doppelseiten `2–3`, `4–5`, …).
+   - **Split-View**: Allows opening a secondary `PdfViewer` pane side-by-side with the primary viewer (either comparing two different PDFs or viewing two places in the same PDF).
+   - **Left Sidebar & Gliederung (TOC)**: The left sidebar is horizontally resizable via a drag splitter (`200px–640px`, persisted in `localStorage` under `pdforever.sidebarWidth` and `pdforever.sidebarCollapsed`) and hosts 4 tabs (`Folders`, `Gliederung`, `Tags`, `Notes`) so the Table of Contents does not consume extra horizontal space inside the PDF viewer.
+4. **User Settings (`AppSettings`)**:
    - Persisted in `localStorage` under `pdforever.settings` (and theme under `pdforever.darkMode`).
    - New user-configurable UI options should be added to `AppSettings` in `frontend/src/types.ts` with sensible defaults in `DEFAULT_SETTINGS` (`frontend/src/App.tsx`) and exposed in `frontend/src/components/SettingsModal.tsx`.
 
