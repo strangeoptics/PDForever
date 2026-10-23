@@ -4,7 +4,11 @@ import {
   DocumentFilterParams,
   DocumentItem,
   MetadataEnrichmentReport,
+  OllamaStatus,
   PaginatedResponse,
+  RagPassage,
+  RagQueryPayload,
+  RagResponse,
   ReadingNote,
   SearchResultGroup,
   Tag,
@@ -191,6 +195,112 @@ export const api = {
   searchNotes(query: string): Promise<ReadingNote[]> {
     const sp = new URLSearchParams({ q: query });
     return fetch(`${API_BASE}/notes?${sp.toString()}`).then(handleJson<ReadingNote[]>);
+  },
+
+  getRagStatus(ollamaUrl?: string): Promise<OllamaStatus> {
+    const sp = new URLSearchParams();
+    if (ollamaUrl) sp.set('ollamaUrl', ollamaUrl);
+    const qs = sp.toString();
+    return fetch(`${API_BASE}/rag/status${qs ? `?${qs}` : ''}`).then(handleJson<OllamaStatus>);
+  },
+
+  askRag(payload: RagQueryPayload): Promise<RagResponse> {
+    return fetch(`${API_BASE}/rag/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(handleJson<RagResponse>);
+  },
+
+  streamRag(
+    payload: RagQueryPayload,
+    onPassages: (passages: RagPassage[]) => void,
+    onToken: (token: string) => void,
+    onError: (error: string) => void,
+    onDone: () => void,
+    signal?: AbortSignal
+  ): void {
+    fetch(`${API_BASE}/rag/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    })
+      .then(async (response) => {
+        if (!response.ok || !response.body) {
+          const errText = await response.text().catch(() => response.statusText);
+          onError(`HTTP ${response.status}: ${errText}`);
+          onDone();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let currentEvent = 'message';
+        let currentData: string[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, '');
+            if (line === '') {
+              if (currentData.length > 0 || currentEvent === 'done') {
+                const fullData = currentData.join('\n');
+                if (currentEvent === 'passages') {
+                  try {
+                    const parsed: RagPassage[] = JSON.parse(fullData);
+                    onPassages(parsed);
+                  } catch (e) {
+                    console.error('Failed to parse RAG passages SSE:', e);
+                  }
+                } else if (currentEvent === 'token') {
+                  try {
+                    const parsed = JSON.parse(fullData);
+                    const tokenStr = typeof parsed === 'string' ? parsed : (parsed.token ?? parsed.text ?? '');
+                    onToken(tokenStr);
+                  } catch {
+                    onToken(fullData);
+                  }
+                } else if (currentEvent === 'error') {
+                  try {
+                    const parsed = JSON.parse(fullData);
+                    onError(typeof parsed === 'string' ? parsed : (parsed.error ?? fullData));
+                  } catch {
+                    onError(fullData);
+                  }
+                } else if (currentEvent === 'done') {
+                  onDone();
+                  return;
+                }
+              }
+              currentEvent = 'message';
+              currentData = [];
+            } else if (line.startsWith('event:')) {
+              currentEvent = line.substring(6).trim();
+            } else if (line.startsWith('data:')) {
+              let dataContent = line.substring(5);
+              if (dataContent.startsWith(' {') || dataContent.startsWith(' [')) {
+                dataContent = dataContent.trimStart();
+              }
+              currentData.push(dataContent);
+            }
+          }
+        }
+        onDone();
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          onError(err.message || 'Verbindung zu Ollama fehlgeschlagen');
+        }
+        onDone();
+      });
   },
 };
 

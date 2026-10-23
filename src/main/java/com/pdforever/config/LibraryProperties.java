@@ -13,8 +13,28 @@ public record LibraryProperties(
         long debounceMs,
         boolean watcherEnabled,
         List<String> cleanRemoveLiterals,
-        List<String> cleanRemoveRegexes
+        List<String> cleanRemoveRegexes,
+        RagProperties rag
 ) {
+    public record RagProperties(
+            boolean enabled,
+            String ollamaUrl,
+            String model,
+            int maxPassages
+    ) {
+        public RagProperties {
+            if (ollamaUrl == null || ollamaUrl.isBlank()) {
+                ollamaUrl = "http://localhost:11434";
+            }
+            if (model == null || model.isBlank()) {
+                model = "qwen2.5:14b";
+            }
+            if (maxPassages <= 0) {
+                maxPassages = 6;
+            }
+        }
+    }
+
     public LibraryProperties {
         if (rootDir == null) {
             rootDir = Path.of("./storage");
@@ -27,6 +47,9 @@ public record LibraryProperties(
         }
         if (debounceMs <= 0) {
             debounceMs = 2000L;
+        }
+        if (rag == null) {
+            rag = new RagProperties(true, "http://localhost:11434", "qwen2.5:14b", 6);
         }
     }
 }

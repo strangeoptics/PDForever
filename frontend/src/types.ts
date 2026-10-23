@@ -170,6 +170,42 @@ export interface AppSettings {
   coverLayout: 'left' | 'top';
   defaultViewMode: ReaderViewMode;
   defaultInspectorOpen: boolean;
+  ragModel?: string;
+  customOllamaUrl?: string;
 }
+
+export interface RagPassage {
+  documentId: string;
+  documentTitle: string;
+  relativePath: string;
+  pageNumber: number;
+  passageText: string;
+  score: number;
+}
+
+export interface RagResponse {
+  answer: string | null;
+  passages: RagPassage[];
+  model: string;
+  ollamaAvailable: boolean;
+  errorMessage?: string | null;
+}
+
+export interface OllamaStatus {
+  enabled: boolean;
+  available: boolean;
+  ollamaUrl: string;
+  currentModel: string;
+  installedModels: string[];
+  message: string;
+}
+
+export interface RagQueryPayload {
+  query: string;
+  documentId?: string | null;
+  criteria?: DocumentFilterParams;
+  model?: string;
+}
+
 
 

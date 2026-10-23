@@ -130,6 +130,12 @@ Run from the repository root:
    - `GET /api/documents` and `GET /api/search` accept faceted filter parameters: `path`, `tag` (single or comma-separated multi-tag), `status`, `minPages`, `maxPages`, `hasNotes`, `noteQuery` ("PDFs with notes about topic X"), `modifiedAfter`, `modifiedBefore`, `yearFrom`, `yearTo`, `hasMetadata`, `sortBy`, and `sortDir`.
    - `GET /api/documents/facets` computes live facet counts (status counts, `withNotesCount`, `totalNotesCount`, `withMetadataCount`, page buckets `1–20` / `21–100` / `101+`, min/max pages and publication years, and per-tag document counts).
    - In `SearchService`, active facets restrict fulltext Lucene queries via `TermInSetQuery(FIELD_DOC_ID, ...)` with `BooleanClause.Occur.FILTER` while preserving `UnifiedHighlighter` snippet highlighting on `FIELD_CONTENT`.
+10. **Local RAG via Ollama (`OllamaRagService` & `RagController`)**:
+   - Pure, strictly local, optional and non-blocking: The application remains 100% functional without Ollama running.
+   - Zero VRAM retrieval: Passages are retrieved on CPU via embedded Lucene BM25 scoring (`retrievePassages`), scoped either to a single `documentId` or the user's active faceted filters (`DocumentFilterCriteria`).
+   - Default model: `qwen2.5:14b` (~9 GB VRAM, leaving ~3 GB for 16k context on a 12 GB GPU).
+   - Endpoints: `GET /api/rag/status`, `POST /api/rag/ask`, and `POST /api/rag/stream` (SSE token & passage streaming via Java 21 Virtual Threads).
+   - When Ollama is offline or fails, retrieval passages are still returned gracefully with clear status information without throwing unhandled errors.
 
 ### Frontend Rules
 1. **Build Artifacts**:
@@ -140,8 +146,12 @@ Run from the repository root:
 3. **Reader View Modes, Split-View & Resizable Sidebar**:
    - `ReaderViewMode` supports `'continuous'` (fortlaufend), `'single'` (Einzelseite), `'spread'` (Doppelseite: `1–2`, `3–4`, …), and `'book'` (Buchmodus: Deckblatt Seite `1` einzeln, danach Doppelseiten `2–3`, `4–5`, …).
    - **Split-View**: Allows opening a secondary `PdfViewer` pane side-by-side with the primary viewer (either comparing two different PDFs or viewing two places in the same PDF).
-   - **Left Sidebar & Gliederung (TOC)**: The left sidebar is horizontally resizable via a drag splitter (`200px–640px`, persisted in `localStorage` under `pdforever.sidebarWidth` and `pdforever.sidebarCollapsed`) and hosts 4 tabs (`Folders`, `Gliederung`, `Tags`, `Notes`) so the Table of Contents does not consume extra horizontal space inside the PDF viewer.
+   - **Left Sidebar & Gliederung (TOC)**: The left sidebar is horizontally resizable via a drag splitter (`200px–640px`, persisted in `localStorage` under `pdforever.sidebarWidth` and `pdforever.sidebarCollapsed`) and hosts 5 tabs (`Folders`, `Gliederung`, `Tags`, `Notes`, `RAG`) so the Table of Contents does not consume extra horizontal space inside the PDF viewer.
 4. **User Settings (`AppSettings`)**:
    - Persisted in `localStorage` under `pdforever.settings` (and theme under `pdforever.darkMode`).
    - New user-configurable UI options should be added to `AppSettings` in `frontend/src/types.ts` with sensible defaults in `DEFAULT_SETTINGS` (`frontend/src/App.tsx`) and exposed in `frontend/src/components/SettingsModal.tsx`.
+5. **RAG Chat & Interactive Grounded Citations**:
+   - Sidebar tab `rag` offers conversational Q&A against the active document or filtered library.
+   - Citations matching `[S. X]` or `[Titel, S. X]` are parsed into clickable jump buttons that navigate directly to that page in `PdfViewer` via `handleOpenDocument(docId, pageNumber)`.
+   - Includes an expandable source viewer for transparent Lucene passage inspection and an offline status banner with copyable command `ollama run qwen2.5:14b`.
 

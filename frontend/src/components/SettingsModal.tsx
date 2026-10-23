@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Settings,
@@ -15,8 +15,13 @@ import {
   Columns,
   Sparkles,
   RefreshCw,
+  Bot,
+  Cpu,
+  Copy,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
-import { AppSettings } from '../types';
+import { AppSettings, OllamaStatus } from '../types';
 import { api } from '../api';
 
 interface SettingsModalProps {
@@ -44,6 +49,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [cacheMessage, setCacheMessage] = useState<string | null>(null);
   const [enrichingAll, setEnrichingAll] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [checkingOllama, setCheckingOllama] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      checkStatus();
+    }
+  }, [isOpen, settings.customOllamaUrl]);
+
+  const checkStatus = async () => {
+    setCheckingOllama(true);
+    try {
+      const res = await api.getRagStatus(settings.customOllamaUrl);
+      setOllamaStatus(res);
+    } catch {
+      setOllamaStatus({
+        enabled: true,
+        available: false,
+        ollamaUrl: settings.customOllamaUrl || 'http://localhost:11434',
+        currentModel: settings.ragModel || 'qwen2.5:14b',
+        installedModels: [],
+        message: 'Ollama ist offline oder nicht erreichbar.',
+      });
+    } finally {
+      setCheckingOllama(false);
+    }
+  };
+
+  const handleCopyCmd = (cmd: string) => {
+    navigator.clipboard.writeText(cmd);
+    setCopiedCmd(true);
+    setTimeout(() => setCopiedCmd(false), 2000);
+  };
 
   if (!isOpen) return null;
 
@@ -390,6 +429,141 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Alle PDFs neu scannen
                 </button>
               </div>
+            </div>
+          </section>
+
+          {/* Section 4: Lokales RAG / Ollama (Optional) */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Bot className="w-3.5 h-3.5 text-purple-500" />
+                Lokales RAG & KI-Assistent (Ollama)
+              </h3>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                    ollamaStatus?.available
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                  }`}
+                >
+                  {ollamaStatus?.available ? (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                      Ollama Online
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-3 h-3 text-amber-500" />
+                      Ollama Offline
+                    </>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={checkStatus}
+                  disabled={checkingOllama}
+                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                  title="Verbindung neu prüfen"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkingOllama ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 p-4 space-y-4">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <span>Rein lokales RAG (100% datenschutzfreundlich)</span>
+                  <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                    Optional
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  PDForever funktioniert völlig unabhängig auch ohne Ollama. Wenn Ollama auf deinem Rechner läuft, kannst du im linken Sidebar-Tab „RAG“ präzise Fragen an das geöffnete Dokument oder deine gefilterte Bibliothek stellen – mit verlinkten Belegstellen [S. X].
+                </p>
+              </div>
+
+              {/* Ollama URL & Model Settings */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                    Ollama-Endpunkt
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.customOllamaUrl ?? 'http://localhost:11434'}
+                    onChange={(e) =>
+                      onUpdateSettings((prev) => ({
+                        ...prev,
+                        customOllamaUrl: e.target.value.trim() || undefined,
+                      }))
+                    }
+                    placeholder="http://localhost:11434"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                    Modell (Empfohlen: qwen2.5:14b)
+                  </label>
+                  {ollamaStatus?.installedModels && ollamaStatus.installedModels.length > 0 ? (
+                    <select
+                      value={settings.ragModel || ollamaStatus.currentModel || 'qwen2.5:14b'}
+                      onChange={(e) =>
+                        onUpdateSettings((prev) => ({ ...prev, ragModel: e.target.value }))
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
+                    >
+                      {ollamaStatus.installedModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                      {!ollamaStatus.installedModels.includes(settings.ragModel || '') && settings.ragModel && (
+                        <option value={settings.ragModel}>{settings.ragModel} (benutzerdefiniert)</option>
+                      )}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={settings.ragModel ?? 'qwen2.5:14b'}
+                      onChange={(e) =>
+                        onUpdateSettings((prev) => ({
+                          ...prev,
+                          ragModel: e.target.value.trim() || undefined,
+                        }))
+                      }
+                      placeholder="qwen2.5:14b"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Offline hint and copyable command */}
+              {!ollamaStatus?.available && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-500/5 p-3 space-y-2">
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Ollama antwortet derzeit nicht auf{' '}
+                    <code className="font-mono text-[11px] bg-amber-500/10 px-1 py-0.5 rounded">
+                      {settings.customOllamaUrl || 'http://localhost:11434'}
+                    </code>
+                    . Starte Ollama in deinem Terminal:
+                  </p>
+                  <div className="flex items-center justify-between gap-2 bg-slate-900 text-slate-200 px-3 py-1.5 rounded font-mono text-xs">
+                    <span>ollama run {settings.ragModel || 'qwen2.5:14b'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCmd(`ollama run ${settings.ragModel || 'qwen2.5:14b'}`)}
+                      className="p-1 hover:text-white transition"
+                      title="Befehl kopieren"
+                    >
+                      {copiedCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         </div>
