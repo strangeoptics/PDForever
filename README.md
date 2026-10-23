@@ -4,6 +4,8 @@
 
 Built around **in-place storage**, PDForever indexes and streams existing PDFs directly from `./storage` without copying, moving, or renaming your files.
 
+![PDForever Web Client](PDForever_outdoor.png)
+
 ---
 
 ## Architecture Highlights
