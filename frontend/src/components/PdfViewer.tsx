@@ -56,10 +56,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     width: 612,
     height: 792,
   });
+  const [baseScale, setBaseScale] = useState<number>(1.0);
   const [numPages, setNumPages] = useState<number>(docItem.pageCount || 0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageInput, setPageInput] = useState<string>('1');
-  const [scale, setScale] = useState<number>(1.25);
+  // Zoom factor relative to the document's normalized baseScale (1.0 = 100% fit width)
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const zoomByDocRef = useRef<Map<string, number>>(new Map());
   const [viewMode, setViewMode] = useState<'continuous' | 'single'>('continuous');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +72,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
+  const updateDocZoom = useCallback(
+    (updater: (prev: number) => number) => {
+      setZoomLevel((prev) => {
+        const next = Math.max(0.4, Math.min(3.0, Number(updater(prev).toFixed(2))));
+        zoomByDocRef.current.set(docItem.id, next);
+        return next;
+      });
+    },
+    [docItem.id]
+  );
+
   // Load PDF using HTTP Byte-Range streaming (1 MB chunks)
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +90,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     setError(null);
     setPdfDoc(null);
     setFloatingMenu(null);
+
+    // Restore saved zoom level for this specific document, or default to 1.0 (100%)
+    const savedDocZoom = zoomByDocRef.current.get(docItem.id) ?? 1.0;
+    setZoomLevel(savedDocZoom);
 
     const streamUrl = api.getStreamUrl(docItem.id);
     const loadingTask = pdfjsLib.getDocument({
@@ -94,11 +112,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         try {
           const firstPage = await loadedPdf.getPage(1);
           const unscaledViewport = firstPage.getViewport({ scale: 1 });
-          if (!cancelled) {
+          if (!cancelled && unscaledViewport.width > 0) {
+            const containerWidth = scrollContainerRef.current?.clientWidth || 960;
+            const targetWidthPx = Math.max(480, Math.min(920, containerWidth - 64));
+            const normalizedBaseScale = targetWidthPx / unscaledViewport.width;
+
             setDefaultPageSize({
               width: unscaledViewport.width,
               height: unscaledViewport.height,
             });
+            setBaseScale(normalizedBaseScale);
           }
         } catch {
           // Fallback to standard dimensions if page 1 metadata fails
@@ -302,15 +325,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
 
           <button
-            onClick={() => setScale((s) => Math.max(0.6, Number((s - 0.15).toFixed(2))))}
+            onClick={() => updateDocZoom((z) => z - 0.15)}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
             title="Zoom Out"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
-          <span className="text-xs font-mono w-12 text-center">{Math.round(scale * 100)}%</span>
           <button
-            onClick={() => setScale((s) => Math.min(2.5, Number((s + 0.15).toFixed(2))))}
+            onClick={() => updateDocZoom(() => 1.0)}
+            className="text-xs font-mono w-12 text-center py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+            title="Click to reset zoom to 100% (Document Fit)"
+          >
+            {Math.round(zoomLevel * 100)}%
+          </button>
+          <button
+            onClick={() => updateDocZoom((z) => z + 0.15)}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
             title="Zoom In"
           >
@@ -411,7 +440,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 key={pageNumber}
                 pdfDoc={pdfDoc}
                 pageNumber={pageNumber}
-                scale={scale}
+                scale={baseScale * zoomLevel}
                 defaultPageSize={defaultPageSize}
                 pageNotes={pageNotes}
                 highlightedNoteId={highlightedNoteId}
