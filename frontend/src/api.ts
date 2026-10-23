@@ -5,8 +5,10 @@ import {
   ReadingNote,
   SearchResultGroup,
   Tag,
+  TocItem,
   TreeNode,
   UpdateNotePayload,
+  UpdateReadingProgressPayload,
 } from './types';
 
 const API_BASE = '/api';
@@ -28,17 +30,40 @@ export const api = {
     return fetch(`${API_BASE}/tree/reconcile`, { method: 'POST' }).then(handleJson<TreeNode>);
   },
 
-  getDocuments(params: { path?: string; tag?: string; page?: number; size?: number }): Promise<PaginatedResponse<DocumentItem>> {
+  getDocuments(params: {
+    path?: string;
+    tag?: string;
+    status?: string;
+    page?: number;
+    size?: number;
+  }): Promise<PaginatedResponse<DocumentItem>> {
     const sp = new URLSearchParams();
     if (params.path) sp.set('path', params.path);
     if (params.tag) sp.set('tag', params.tag);
+    if (params.status) sp.set('status', params.status);
     sp.set('page', String(params.page ?? 0));
     sp.set('size', String(params.size ?? 50));
     return fetch(`${API_BASE}/documents?${sp.toString()}`).then(handleJson<PaginatedResponse<DocumentItem>>);
   },
 
+  getRecentDocuments(limit = 6): Promise<DocumentItem[]> {
+    return fetch(`${API_BASE}/documents/recent?limit=${limit}`).then(handleJson<DocumentItem[]>);
+  },
+
   getDocument(id: string): Promise<DocumentItem> {
     return fetch(`${API_BASE}/documents/${id}`).then(handleJson<DocumentItem>);
+  },
+
+  getDocumentOutline(id: string): Promise<TocItem[]> {
+    return fetch(`${API_BASE}/documents/${id}/outline`).then(handleJson<TocItem[]>);
+  },
+
+  updateReadingProgress(id: string, payload: UpdateReadingProgressPayload): Promise<DocumentItem> {
+    return fetch(`${API_BASE}/documents/${id}/progress`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(handleJson<DocumentItem>);
   },
 
   getStreamUrl(id: string): string {

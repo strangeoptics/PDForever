@@ -19,8 +19,11 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -52,6 +55,11 @@ public class LibraryManagementService {
 
     @Transactional(readOnly = true)
     public Page<DocumentDto> getDocuments(String path, String tag, int page, int size) {
+        return getDocuments(path, tag, null, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<DocumentDto> getDocuments(String path, String tag, String status, int page, int size) {
         String normalizedPath = path != null ? path.replace('\\', '/').strip() : null;
         if (normalizedPath != null && normalizedPath.startsWith("/")) {
             normalizedPath = normalizedPath.substring(1);
@@ -60,13 +68,66 @@ public class LibraryManagementService {
             normalizedPath = normalizedPath.substring(0, normalizedPath.length() - 1);
         }
         String normalizedTag = tag != null ? tag.strip() : null;
+        String normalizedStatus = status != null && !status.isBlank() ? status.strip().toUpperCase(Locale.ROOT) : null;
 
         Page<Document> docs = documentRepository.findFilteredDocuments(
                 normalizedPath,
                 normalizedTag,
+                normalizedStatus,
                 PageRequest.of(Math.max(0, page), Math.clamp(size, 1, 200))
         );
         return docs.map(this::toDocumentDto);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentDto> getRecentDocuments(int limit) {
+        int clampedLimit = Math.clamp(limit, 1, 24);
+        return documentRepository.findRecentlyReadDocuments(PageRequest.of(0, clampedLimit)).stream()
+                .map(this::toDocumentDto)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TocItemDto> getDocumentOutline(UUID id) {
+        Path pdfPath = getDocumentFilePath(id);
+        return pdfExtractionService.extractOutline(pdfPath);
+    }
+
+    private static final Set<String> VALID_READING_STATUSES = Set.of("UNREAD", "READING", "COMPLETED");
+
+    @Transactional
+    public DocumentDto updateReadingProgress(UUID id, UpdateReadingProgressRequest request) {
+        Document doc = findActiveDocumentOrThrow(id);
+        int maxPage = Math.max(1, doc.getPageCount() != null ? doc.getPageCount() : 1);
+
+        if (request.lastReadPage() != null) {
+            int clampedPage = Math.clamp(request.lastReadPage(), 1, maxPage);
+            doc.setLastReadPage(clampedPage);
+            doc.setLastOpenedAt(Instant.now());
+
+            // Auto-transition from UNREAD to READING (or COMPLETED on the last page of multi-page PDFs)
+            if (request.readingStatus() == null || request.readingStatus().isBlank()) {
+                String currentStatus = doc.getReadingStatus();
+                if ("UNREAD".equalsIgnoreCase(currentStatus)) {
+                    doc.setReadingStatus("READING");
+                }
+            }
+        }
+
+        if (request.readingStatus() != null && !request.readingStatus().isBlank()) {
+            String normalizedStatus = request.readingStatus().strip().toUpperCase(Locale.ROOT);
+            if (VALID_READING_STATUSES.contains(normalizedStatus)) {
+                doc.setReadingStatus(normalizedStatus);
+                if ("UNREAD".equals(normalizedStatus) && request.lastReadPage() == null) {
+                    doc.setLastReadPage(1);
+                } else if (doc.getLastOpenedAt() == null) {
+                    doc.setLastOpenedAt(Instant.now());
+                }
+            }
+        }
+
+        Document saved = documentRepository.save(doc);
+        return toDocumentDto(saved);
     }
 
     @Transactional(readOnly = true)
@@ -255,7 +316,10 @@ public class LibraryManagementService {
                 doc.getPageCount(),
                 doc.getLastModifiedFs(),
                 doc.getCreatedAt(),
-                sortedTags
+                sortedTags,
+                doc.getReadingStatus(),
+                doc.getLastReadPage(),
+                doc.getLastOpenedAt()
         );
     }
 

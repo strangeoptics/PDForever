@@ -1,7 +1,9 @@
 package com.pdforever.controller;
 
 import com.pdforever.dto.DocumentDto;
+import com.pdforever.dto.TocItemDto;
 import com.pdforever.dto.TreeNodeDto;
+import com.pdforever.dto.UpdateReadingProgressRequest;
 import com.pdforever.service.DirectoryScannerService;
 import com.pdforever.service.LibraryManagementService;
 import org.springframework.core.io.FileSystemResource;
@@ -54,15 +56,36 @@ public class DocumentController {
     public Page<DocumentDto> listDocuments(
             @RequestParam(required = false) String path,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
-        return libraryService.getDocuments(path, tag, page, size);
+        return libraryService.getDocuments(path, tag, status, page, size);
+    }
+
+    @GetMapping("/documents/recent")
+    public List<DocumentDto> getRecentDocuments(
+            @RequestParam(defaultValue = "6") int limit
+    ) {
+        return libraryService.getRecentDocuments(limit);
     }
 
     @GetMapping("/documents/{id}")
     public DocumentDto getDocument(@PathVariable UUID id) {
         return libraryService.getDocument(id);
+    }
+
+    @GetMapping("/documents/{id}/outline")
+    public List<TocItemDto> getDocumentOutline(@PathVariable UUID id) {
+        return libraryService.getDocumentOutline(id);
+    }
+
+    @PutMapping("/documents/{id}/progress")
+    public DocumentDto updateReadingProgress(
+            @PathVariable UUID id,
+            @RequestBody UpdateReadingProgressRequest request
+    ) {
+        return libraryService.updateReadingProgress(id, request);
     }
 
     /**

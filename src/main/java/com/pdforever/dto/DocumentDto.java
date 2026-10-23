@@ -12,7 +12,10 @@ public record DocumentDto(
         Integer pageCount,
         Instant lastModifiedFs,
         Instant createdAt,
-        List<TagDto> tags
+        List<TagDto> tags,
+        String readingStatus,
+        Integer lastReadPage,
+        Instant lastOpenedAt
 ) {
 }
 

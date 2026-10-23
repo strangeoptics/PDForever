@@ -47,6 +47,15 @@ public class Document {
     @Column(name = "is_deleted", nullable = false)
     private boolean isDeleted = false;
 
+    @Column(name = "reading_status", length = 32)
+    private String readingStatus = "UNREAD";
+
+    @Column(name = "last_read_page")
+    private Integer lastReadPage = 1;
+
+    @Column(name = "last_opened_at")
+    private Instant lastOpenedAt;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "document_tags",
@@ -127,6 +136,30 @@ public class Document {
 
     public void setDeleted(boolean deleted) {
         isDeleted = deleted;
+    }
+
+    public String getReadingStatus() {
+        return readingStatus != null && !readingStatus.isBlank() ? readingStatus : "UNREAD";
+    }
+
+    public void setReadingStatus(String readingStatus) {
+        this.readingStatus = readingStatus;
+    }
+
+    public Integer getLastReadPage() {
+        return lastReadPage != null && lastReadPage >= 1 ? lastReadPage : 1;
+    }
+
+    public void setLastReadPage(Integer lastReadPage) {
+        this.lastReadPage = lastReadPage;
+    }
+
+    public Instant getLastOpenedAt() {
+        return lastOpenedAt;
+    }
+
+    public void setLastOpenedAt(Instant lastOpenedAt) {
+        this.lastOpenedAt = lastOpenedAt;
     }
 
     public Set<Tag> getTags() {

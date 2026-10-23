@@ -25,12 +25,22 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
             WHERE d.isDeleted = false
               AND (:pathPrefix IS NULL OR :pathPrefix = '' OR d.relativePath = :pathPrefix OR d.relativePath LIKE CONCAT(:pathPrefix, '/%'))
               AND (:tagName IS NULL OR :tagName = '' OR LOWER(t.name) = LOWER(:tagName))
+              AND (:readingStatus IS NULL OR :readingStatus = '' OR COALESCE(d.readingStatus, 'UNREAD') = UPPER(:readingStatus))
             ORDER BY d.fileName ASC
             """)
     Page<Document> findFilteredDocuments(
             @Param("pathPrefix") String pathPrefix,
             @Param("tagName") String tagName,
+            @Param("readingStatus") String readingStatus,
             Pageable pageable
     );
+
+    @Query("""
+            SELECT d FROM Document d
+            WHERE d.isDeleted = false
+              AND (d.lastOpenedAt IS NOT NULL OR d.readingStatus = 'READING')
+            ORDER BY d.lastOpenedAt DESC, d.lastModifiedFs DESC
+            """)
+    List<Document> findRecentlyReadDocuments(Pageable pageable);
 }
 

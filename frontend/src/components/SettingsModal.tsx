@@ -6,6 +6,8 @@ import {
   Sun,
   Moon,
   BookOpen,
+  BookOpenCheck,
+  FileText,
   ScrollText,
   Trash2,
   Check,
@@ -252,7 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Default Reader Mode */}
-              <div className="p-4 flex items-center justify-between gap-4">
+              <div className="p-4 space-y-2.5">
                 <div>
                   <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
                     Standard-Lesemodus
@@ -261,16 +263,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Bevorzugte Seitenansicht beim Öffnen eines PDF-Dokuments.
                   </p>
                 </div>
-                <div className="inline-flex rounded-lg p-0.5 bg-slate-200/70 dark:bg-slate-800">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() =>
                       onUpdateSettings((prev) => ({ ...prev, defaultViewMode: 'continuous' }))
                     }
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition ${
                       settings.defaultViewMode === 'continuous'
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     <ScrollText className="w-3.5 h-3.5 text-blue-500" />
@@ -281,14 +283,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClick={() =>
                       onUpdateSettings((prev) => ({ ...prev, defaultViewMode: 'single' }))
                     }
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition ${
                       settings.defaultViewMode === 'single'
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-amber-500" />
+                    <FileText className="w-3.5 h-3.5 text-amber-500" />
                     Einzelseite
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateSettings((prev) => ({ ...prev, defaultViewMode: 'spread' }))
+                    }
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition ${
+                      settings.defaultViewMode === 'spread'
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+                    Doppelseite
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateSettings((prev) => ({ ...prev, defaultViewMode: 'book' }))
+                    }
+                    className={`flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition ${
+                      settings.defaultViewMode === 'book'
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <BookOpenCheck className="w-3.5 h-3.5 text-purple-500" />
+                    Buchmodus
                   </button>
                 </div>
               </div>

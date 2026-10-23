@@ -13,6 +13,21 @@ export interface Tag {
   colorHex: string;
 }
 
+export type ReadingStatus = 'UNREAD' | 'READING' | 'COMPLETED';
+
+export type ReaderViewMode = 'continuous' | 'single' | 'spread' | 'book';
+
+export interface TocItem {
+  title: string;
+  pageNumber: number | null;
+  children: TocItem[];
+}
+
+export interface UpdateReadingProgressPayload {
+  lastReadPage?: number;
+  readingStatus?: ReadingStatus;
+}
+
 export interface DocumentItem {
   id: string;
   relativePath: string;
@@ -22,6 +37,9 @@ export interface DocumentItem {
   lastModifiedFs: string;
   createdAt: string;
   tags: Tag[];
+  readingStatus: ReadingStatus;
+  lastReadPage: number;
+  lastOpenedAt: string | null;
 }
 
 export interface PaginatedResponse<T> {
@@ -82,7 +100,7 @@ export interface SearchResultGroup {
 export interface AppSettings {
   showCovers: boolean;
   coverLayout: 'left' | 'top';
-  defaultViewMode: 'continuous' | 'single';
+  defaultViewMode: ReaderViewMode;
   defaultInspectorOpen: boolean;
 }
 

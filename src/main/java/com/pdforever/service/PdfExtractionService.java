@@ -1,8 +1,17 @@
 package com.pdforever.service;
 
+import com.pdforever.dto.TocItemDto;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.RandomAccessReadBufferedFile;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -18,7 +27,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class PdfExtractionService {
@@ -107,6 +118,93 @@ public class PdfExtractionService {
             log.error("Corrupt or unreadable PDF file at {}: {}", pdfPath, ex.getMessage());
             return new ExtractedPdfData(0, Collections.emptyList(), false);
         }
+    }
+
+    /**
+     * Extracts the hierarchical Table of Contents (PDF bookmarks / outline) using Apache PDFBox 3.x.
+     */
+    public List<TocItemDto> extractOutline(Path pdfPath) {
+        try (var randomAccessRead = new RandomAccessReadBufferedFile(pdfPath);
+             PDDocument pdDocument = Loader.loadPDF(randomAccessRead)) {
+
+            PDDocumentCatalog catalog = pdDocument.getDocumentCatalog();
+            if (catalog == null) {
+                return Collections.emptyList();
+            }
+            PDDocumentOutline outline = catalog.getDocumentOutline();
+            if (outline == null) {
+                return Collections.emptyList();
+            }
+
+            Set<COSBase> visited = new HashSet<>();
+            return extractOutlineNodes(pdDocument, outline, visited, 0);
+        } catch (IOException | RuntimeException ex) {
+            log.warn("Failed to extract outline from {}: {}", pdfPath, ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private List<TocItemDto> extractOutlineNodes(
+            PDDocument pdDocument,
+            PDOutlineNode parentNode,
+            Set<COSBase> visited,
+            int depth
+    ) {
+        if (depth > 8 || parentNode == null) {
+            return Collections.emptyList();
+        }
+
+        List<TocItemDto> result = new ArrayList<>();
+        PDOutlineItem current = parentNode.getFirstChild();
+        int count = 0;
+
+        while (current != null && count < 400) {
+            count++;
+            COSBase cosObj = current.getCOSObject();
+            if (cosObj != null && !visited.add(cosObj)) {
+                break;
+            }
+
+            String rawTitle = current.getTitle();
+            String title = (rawTitle != null && !rawTitle.isBlank()) ? rawTitle.strip() : "Kapitel";
+            Integer pageNumber = resolveOutlinePageNumber(pdDocument, current);
+            List<TocItemDto> children = extractOutlineNodes(pdDocument, current, visited, depth + 1);
+
+            result.add(new TocItemDto(title, pageNumber, children));
+            current = current.getNextSibling();
+        }
+
+        return result;
+    }
+
+    private Integer resolveOutlinePageNumber(PDDocument pdDocument, PDOutlineItem item) {
+        try {
+            PDPage page = item.findDestinationPage(pdDocument);
+            if (page != null) {
+                int idx = pdDocument.getPages().indexOf(page);
+                if (idx >= 0) {
+                    return idx + 1;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        try {
+            if (item.getDestination() instanceof PDPageDestination pageDest) {
+                int pageNum = pageDest.retrievePageNumber();
+                if (pageNum >= 0) {
+                    return pageNum + 1;
+                }
+            } else if (item.getAction() instanceof PDActionGoTo goTo && goTo.getDestination() instanceof PDPageDestination pageDest) {
+                int pageNum = pageDest.retrievePageNumber();
+                if (pageNum >= 0) {
+                    return pageNum + 1;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        return null;
     }
 }
 

@@ -20,6 +20,14 @@ import {
   ExternalLink,
   Layers,
   Settings,
+  CheckCircle2,
+  Clock,
+  CircleDashed,
+  Columns2,
+  Play,
+  PanelLeftClose,
+  PanelLeftOpen,
+  GripVertical,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -27,9 +35,11 @@ import {
   BoundingBox,
   DocumentItem,
   ReadingNote,
+  ReadingStatus,
   SearchResultGroup,
   Tag,
   TreeNode,
+  UpdateReadingProgressPayload,
 } from './types';
 import { PdfViewer } from './components/PdfViewer';
 import { NoteModal } from './components/NoteModal';
@@ -38,6 +48,11 @@ import { SettingsModal } from './components/SettingsModal';
 
 const SETTINGS_STORAGE_KEY = 'pdforever.settings';
 const DARK_MODE_STORAGE_KEY = 'pdforever.darkMode';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'pdforever.sidebarWidth';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'pdforever.sidebarCollapsed';
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 640;
+const DEFAULT_SIDEBAR_WIDTH = 320;
 
 const DEFAULT_SETTINGS: AppSettings = {
   showCovers: true,
@@ -65,6 +80,27 @@ function loadInitialDarkMode(): boolean {
   }
 }
 
+function loadInitialSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!raw) return DEFAULT_SIDEBAR_WIDTH;
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed)) return DEFAULT_SIDEBAR_WIDTH;
+    return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, parsed));
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function loadInitialSidebarCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+    return raw !== null ? Boolean(JSON.parse(raw)) : false;
+  } catch {
+    return false;
+  }
+}
+
 const TAG_COLORS = [
   '#3b82f6',
   '#10b981',
@@ -81,10 +117,15 @@ export const App: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [coverCacheVersion, setCoverCacheVersion] = useState<number>(0);
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'tags' | 'notes'>('folders');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(loadInitialSidebarWidth);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadInitialSidebarCollapsed);
+  const [isResizingSidebar, setIsResizingSidebar] = useState<boolean>(false);
 
   // Data state
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<DocumentItem[]>([]);
+  const [allDocumentsList, setAllDocumentsList] = useState<DocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState<number>(0);
   const [tags, setTags] = useState<Tag[]>([]);
   const [globalNotes, setGlobalNotes] = useState<ReadingNote[]>([]);
@@ -93,6 +134,7 @@ export const App: React.FC = () => {
   // Filter & Selection state
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>('');
   const [selectedTagName, setSelectedTagName] = useState<string>('');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('');
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
   const [targetJump, setTargetJump] = useState<{
     page: number;
@@ -100,6 +142,16 @@ export const App: React.FC = () => {
     timestamp: number;
   } | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(true);
+
+  // Split-View (Secondary Reader Pane) state
+  const [splitViewOpen, setSplitViewOpen] = useState<boolean>(false);
+  const [secondaryDoc, setSecondaryDoc] = useState<DocumentItem | null>(null);
+  const [secondaryDocNotes, setSecondaryDocNotes] = useState<ReadingNote[]>([]);
+  const [secondaryTargetJump, setSecondaryTargetJump] = useState<{
+    page: number;
+    noteId?: string;
+    timestamp: number;
+  } | null>(null);
 
   // Instant Lucene Search state
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -118,6 +170,7 @@ export const App: React.FC = () => {
   // Note Modal state
   const [noteModalOpen, setNoteModalOpen] = useState<boolean>(false);
   const [pendingSelection, setPendingSelection] = useState<{
+    documentId?: string;
     pageNumber: number;
     selectedText: string;
     boundingBox: BoundingBox;
@@ -150,23 +203,81 @@ export const App: React.FC = () => {
     }
   }, [settings]);
 
+  // Sidebar width & collapse persistence
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    } catch {
+      // ignore storage errors
+    }
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(sidebarCollapsed));
+    } catch {
+      // ignore storage errors
+    }
+  }, [sidebarCollapsed]);
+
+  // Global mousemove / mouseup listeners while dragging the left sidebar resizer
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (e.clientX < 90) {
+        setSidebarCollapsed(true);
+        return;
+      }
+      setSidebarCollapsed(false);
+      const clamped = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, e.clientX));
+      setSidebarWidth(clamped);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingSidebar]);
+
   const loadLibraryData = useCallback(async () => {
     try {
-      const [treeData, tagsData, docsPage, allNotes] = await Promise.all([
+      const [treeData, tagsData, docsPage, recentDocs, allDocsPage, allNotes] = await Promise.all([
         api.getTree(),
         api.getTags(),
-        api.getDocuments({ path: selectedFolderPath, tag: selectedTagName, page: 0, size: 100 }),
+        api.getDocuments({
+          path: selectedFolderPath,
+          tag: selectedTagName,
+          status: selectedStatusFilter,
+          page: 0,
+          size: 100,
+        }),
+        api.getRecentDocuments(6),
+        api.getDocuments({ page: 0, size: 200 }),
         api.searchNotes(noteSearchQuery),
       ]);
       setTree(treeData);
       setTags(tagsData);
       setDocuments(docsPage.content);
-      setTotalDocs(docsPage.totalElements);
+      setRecentDocuments(recentDocs);
+      setAllDocumentsList(allDocsPage.content);
+      setTotalDocs(allDocsPage.totalElements);
       setGlobalNotes(allNotes);
     } catch (err) {
       console.error('Error loading library data:', err);
     }
-  }, [selectedFolderPath, selectedTagName, noteSearchQuery]);
+  }, [selectedFolderPath, selectedTagName, selectedStatusFilter, noteSearchQuery]);
 
   useEffect(() => {
     loadLibraryData();
@@ -182,7 +293,19 @@ export const App: React.FC = () => {
       .getDocumentNotes(activeDoc.id)
       .then(setDocNotes)
       .catch((err) => console.error('Failed to load document notes:', err));
-  }, [activeDoc]);
+  }, [activeDoc?.id]);
+
+  // Load notes when secondary document in Split-View changes
+  useEffect(() => {
+    if (!secondaryDoc || !splitViewOpen) {
+      setSecondaryDocNotes([]);
+      return;
+    }
+    api
+      .getDocumentNotes(secondaryDoc.id)
+      .then(setSecondaryDocNotes)
+      .catch((err) => console.error('Failed to load secondary document notes:', err));
+  }, [secondaryDoc?.id, splitViewOpen]);
 
   // Instant Lucene Search debounce
   useEffect(() => {
@@ -218,14 +341,65 @@ export const App: React.FC = () => {
   }, []);
 
   const handleOpenDocument = useCallback(
-    async (docId: string, page = 1, noteId?: string) => {
+    async (docId: string, explicitPage?: number, noteId?: string) => {
       try {
         const doc = await api.getDocument(docId);
+        const targetPage = explicitPage ?? (doc.lastReadPage && doc.lastReadPage > 1 ? doc.lastReadPage : 1);
         setActiveDoc(doc);
-        setTargetJump({ page, noteId, timestamp: Date.now() });
+        setTargetJump({ page: targetPage, noteId, timestamp: Date.now() });
         setSearchOpen(false);
       } catch (err) {
         console.error('Failed to open document:', err);
+      }
+    },
+    []
+  );
+
+  const handleOpenInSplitView = useCallback(
+    async (docId: string, explicitPage?: number) => {
+      try {
+        const doc = await api.getDocument(docId);
+        const targetPage = explicitPage ?? (doc.lastReadPage && doc.lastReadPage > 1 ? doc.lastReadPage : 1);
+        if (!activeDoc) {
+          setActiveDoc(doc);
+          setTargetJump({ page: targetPage, timestamp: Date.now() });
+        } else {
+          setSecondaryDoc(doc);
+          setSecondaryTargetJump({ page: targetPage, timestamp: Date.now() });
+          setSplitViewOpen(true);
+        }
+      } catch (err) {
+        console.error('Failed to open document in split view:', err);
+      }
+    },
+    [activeDoc]
+  );
+
+  const handleToggleSplitView = useCallback(() => {
+    setSplitViewOpen((prev) => {
+      const next = !prev;
+      if (next && !secondaryDoc && activeDoc) {
+        setSecondaryDoc(activeDoc);
+        setSecondaryTargetJump({ page: activeDoc.lastReadPage || 1, timestamp: Date.now() });
+      }
+      return next;
+    });
+  }, [activeDoc, secondaryDoc]);
+
+  const handleUpdateReadingProgress = useCallback(
+    async (docId: string, payload: UpdateReadingProgressPayload) => {
+      try {
+        const updated = await api.updateReadingProgress(docId, payload);
+        setActiveDoc((prev) => (prev && prev.id === docId ? updated : prev));
+        setSecondaryDoc((prev) => (prev && prev.id === docId ? updated : prev));
+        setDocuments((prev) => prev.map((d) => (d.id === docId ? updated : d)));
+        setAllDocumentsList((prev) => prev.map((d) => (d.id === docId ? updated : d)));
+        api
+          .getRecentDocuments(6)
+          .then(setRecentDocuments)
+          .catch(() => {});
+      } catch (err) {
+        console.error('Failed to update reading progress:', err);
       }
     },
     []
@@ -276,7 +450,9 @@ export const App: React.FC = () => {
     noteMarkdown: string;
     boundingBox: BoundingBox;
   }) => {
-    if (!activeDoc) return;
+    const targetDocId = pendingSelection.documentId || activeDoc?.id;
+    if (!targetDocId) return;
+
     if (editingNote) {
       await api.updateNote(editingNote.id, {
         selectedText: data.selectedText,
@@ -285,19 +461,22 @@ export const App: React.FC = () => {
       });
     } else {
       await api.createNote({
-        documentId: activeDoc.id,
+        documentId: targetDocId,
         pageNumber: data.pageNumber,
         selectedText: data.selectedText,
         noteMarkdown: data.noteMarkdown,
         boundingBox: data.boundingBox,
       });
     }
-    const [updatedDocNotes, updatedGlobalNotes] = await Promise.all([
-      api.getDocumentNotes(activeDoc.id),
-      api.searchNotes(noteSearchQuery),
-    ]);
-    setDocNotes(updatedDocNotes);
-    setGlobalNotes(updatedGlobalNotes);
+
+    const promises: Promise<unknown>[] = [api.searchNotes(noteSearchQuery).then(setGlobalNotes)];
+    if (activeDoc) {
+      promises.push(api.getDocumentNotes(activeDoc.id).then(setDocNotes));
+    }
+    if (secondaryDoc && splitViewOpen) {
+      promises.push(api.getDocumentNotes(secondaryDoc.id).then(setSecondaryDocNotes));
+    }
+    await Promise.all(promises);
     setEditingNote(null);
   };
 
@@ -306,17 +485,70 @@ export const App: React.FC = () => {
     if (activeDoc) {
       setDocNotes((prev) => prev.filter((n) => n.id !== noteId));
     }
+    if (secondaryDoc) {
+      setSecondaryDocNotes((prev) => prev.filter((n) => n.id !== noteId));
+    }
     setGlobalNotes((prev) => prev.filter((n) => n.id !== noteId));
+  };
+
+  const renderStatusBadge = (doc: DocumentItem) => {
+    const status: ReadingStatus = doc.readingStatus || 'UNREAD';
+    const pct = Math.min(
+      100,
+      Math.max(0, Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100))
+    );
+
+    if (status === 'COMPLETED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+          <CheckCircle2 className="w-3 h-3" />
+          Gelesen
+        </span>
+      );
+    }
+    if (status === 'READING') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+          <Clock className="w-3 h-3" />
+          S. {doc.lastReadPage || 1}/{doc.pageCount} ({pct}%)
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+        <CircleDashed className="w-3 h-3" />
+        Ungelesen
+      </span>
+    );
   };
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* Top Bar */}
       <header className="h-14 shrink-0 px-4 flex items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30">
-        {/* Brand */}
-        <div className="flex items-center gap-3">
+        {/* Brand & Left Sidebar Toggle */}
+        <div className="flex items-center gap-2.5">
           <button
-            onClick={() => setActiveDoc(null)}
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+            title={
+              sidebarCollapsed
+                ? 'Linke Seitenleiste einblenden'
+                : 'Linke Seitenleiste ausblenden'
+            }
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="w-4 h-4" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4" />
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveDoc(null);
+              setSplitViewOpen(false);
+            }}
             className="flex items-center gap-2.5 text-left group"
           >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
@@ -422,7 +654,10 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           {activeDoc && (
             <button
-              onClick={() => setActiveDoc(null)}
+              onClick={() => {
+                setActiveDoc(null);
+                setSplitViewOpen(false);
+              }}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <Layers className="w-3.5 h-3.5" />
@@ -462,8 +697,12 @@ export const App: React.FC = () => {
       {/* 3-Panel Workspace */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left Sidebar: 3 Tabs (Directory Tree, Tag Browser, Global Reading Notes) */}
-        <aside className="w-72 sm:w-80 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90">
-          {/* Sidebar Navigation Tabs */}
+        {!sidebarCollapsed && (
+          <aside
+            style={{ width: `${sidebarWidth}px` }}
+            className="shrink-0 flex flex-col bg-white dark:bg-slate-900/90 overflow-hidden"
+          >
+            {/* Sidebar Navigation Tabs */}
           <div className="grid grid-cols-3 border-b border-slate-200 dark:border-slate-800 p-1 gap-1 bg-slate-100/60 dark:bg-slate-950/50">
             <button
               onClick={() => setSidebarTab('folders')}
@@ -507,7 +746,9 @@ export const App: React.FC = () => {
                 onClick={() => {
                   setSelectedFolderPath('');
                   setSelectedTagName('');
+                  setSelectedStatusFilter('');
                   setActiveDoc(null);
+                  setSplitViewOpen(false);
                 }}
                 className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
                   selectedFolderPath === '' && !activeDoc
@@ -530,11 +771,14 @@ export const App: React.FC = () => {
                     level={0}
                     selectedFolderPath={selectedFolderPath}
                     activeDocId={activeDoc?.id || null}
+                    secondaryDocId={splitViewOpen ? secondaryDoc?.id || null : null}
                     onSelectFolder={(folderPath) => {
                       setSelectedFolderPath(folderPath);
                       setActiveDoc(null);
+                      setSplitViewOpen(false);
                     }}
-                    onSelectFile={(docId) => handleOpenDocument(docId, 1)}
+                    onSelectFile={(docId) => handleOpenDocument(docId)}
+                    onOpenInSplitView={(docId) => handleOpenInSplitView(docId)}
                   />
                 ))}
             </div>
@@ -609,6 +853,7 @@ export const App: React.FC = () => {
                         onClick={() => {
                           setSelectedTagName(tag.name === selectedTagName ? '' : tag.name);
                           setActiveDoc(null);
+                          setSplitViewOpen(false);
                         }}
                         className="flex items-center gap-2 flex-1 text-left truncate"
                       >
@@ -709,39 +954,162 @@ export const App: React.FC = () => {
               </span>
             </button>
           </div>
-        </aside>
+          </aside>
+        )}
 
-        {/* Main Content Area: Either PDF.js Reader + Inspector OR Folder/Tag Document Explorer */}
+        {/* Horizontal Resize Splitter Handle between Left Sidebar and Main Content Area */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Breite der linken Seitenleiste anpassen"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsResizingSidebar(true);
+          }}
+          onDoubleClick={() => {
+            setSidebarCollapsed(false);
+            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+          }}
+          title="Ziehen zum Verkleinern/Vergrößern • Doppelklick für Standardbreite (320px)"
+          className={`group relative w-1.5 shrink-0 cursor-col-resize flex items-center justify-center transition-colors z-20 ${
+            isResizingSidebar
+              ? 'bg-blue-600'
+              : 'bg-slate-200/80 dark:bg-slate-800/90 hover:bg-blue-500/60 dark:hover:bg-blue-500/60'
+          }`}
+        >
+          {/* Invisible wider hit-area for effortless grabbing */}
+          <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
+          <div
+            className={`pointer-events-none flex items-center justify-center w-3.5 h-8 rounded-full border shadow-xs transition-opacity ${
+              isResizingSidebar
+                ? 'opacity-100 bg-blue-600 border-blue-400 text-white'
+                : 'opacity-0 group-hover:opacity-100 bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-300'
+            }`}
+          >
+            <GripVertical className="w-3 h-3" />
+          </div>
+        </div>
+
+        {/* Main Content Area: Either PDF.js Reader (+ Optional Split-View & Inspector) OR Document Explorer */}
         <main className="flex-1 flex min-w-0 overflow-hidden">
           {activeDoc ? (
             <>
-              <div className="flex-1 min-w-0 h-full">
-                <PdfViewer
-                  document={activeDoc}
-                  notes={docNotes}
-                  targetJump={targetJump}
-                  inspectorOpen={inspectorOpen}
-                  defaultViewMode={settings.defaultViewMode}
-                  onToggleInspector={() => setInspectorOpen((o) => !o)}
-                  onRequestCreateNote={(sel) => {
-                    setEditingNote(null);
-                    setPendingSelection(sel);
-                    setNoteModalOpen(true);
-                  }}
-                  onSelectNote={(note) => {
-                    setInspectorOpen(true);
-                    setTargetJump({
-                      page: note.pageNumber,
-                      noteId: note.id,
-                      timestamp: Date.now(),
-                    });
-                  }}
-                />
+              {/* Reader Area: Single or Side-by-Side Split-View */}
+              <div className="flex-1 flex min-w-0 h-full divide-x divide-slate-200 dark:divide-slate-800">
+                {/* Primary PDF Viewer */}
+                <div className="flex-1 min-w-0 h-full">
+                  <PdfViewer
+                    document={activeDoc}
+                    notes={docNotes}
+                    targetJump={targetJump}
+                    inspectorOpen={inspectorOpen}
+                    defaultViewMode={settings.defaultViewMode}
+                    isSplitView={splitViewOpen}
+                    isSecondaryPane={false}
+                    onToggleInspector={() => setInspectorOpen((o) => !o)}
+                    onToggleSplitView={handleToggleSplitView}
+                    onUpdateProgress={handleUpdateReadingProgress}
+                    onRequestCreateNote={(sel) => {
+                      setEditingNote(null);
+                      setPendingSelection(sel);
+                      setNoteModalOpen(true);
+                    }}
+                    onSelectNote={(note) => {
+                      setInspectorOpen(true);
+                      setTargetJump({
+                        page: note.pageNumber,
+                        noteId: note.id,
+                        timestamp: Date.now(),
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Secondary PDF Viewer (Split-View Mode) */}
+                {splitViewOpen && secondaryDoc && (
+                  <div className="flex-1 min-w-0 h-full">
+                    <PdfViewer
+                      document={secondaryDoc}
+                      notes={secondaryDocNotes}
+                      targetJump={secondaryTargetJump}
+                      inspectorOpen={inspectorOpen}
+                      defaultViewMode={settings.defaultViewMode}
+                      isSplitView={true}
+                      isSecondaryPane={true}
+                      availableDocuments={allDocumentsList.length > 0 ? allDocumentsList : documents}
+                      onCloseSecondaryPane={() => setSplitViewOpen(false)}
+                      onChangeSecondaryDocument={(newDocId) => handleOpenInSplitView(newDocId)}
+                      onUpdateProgress={handleUpdateReadingProgress}
+                      onRequestCreateNote={(sel) => {
+                        setEditingNote(null);
+                        setPendingSelection(sel);
+                        setNoteModalOpen(true);
+                      }}
+                      onSelectNote={(note) => {
+                        setInspectorOpen(true);
+                        setSecondaryTargetJump({
+                          page: note.pageNumber,
+                          noteId: note.id,
+                          timestamp: Date.now(),
+                        });
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Right Split-Pane Inspector: Document Tags & Reading Notes (Lesezettel) */}
+              {/* Right Split-Pane Inspector: Reading Status, Document Tags & Reading Notes (Lesezettel) */}
               {inspectorOpen && (
                 <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col h-full overflow-hidden">
+                  {/* Reading Progress & Status Section */}
+                  <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-blue-500" />
+                        Lesefortschritt & Status
+                      </h4>
+                      <span className="text-[11px] font-mono text-slate-500">
+                        S. {activeDoc.lastReadPage || 1} / {activeDoc.pageCount}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          { id: 'UNREAD', label: 'Ungelesen', icon: CircleDashed },
+                          { id: 'READING', label: 'Am Lesen', icon: Clock },
+                          { id: 'COMPLETED', label: 'Gelesen', icon: CheckCircle2 },
+                        ] as const
+                      ).map((st) => {
+                        const isCurrent = (activeDoc.readingStatus || 'UNREAD') === st.id;
+                        const Icon = st.icon;
+                        return (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() =>
+                              handleUpdateReadingProgress(activeDoc.id, {
+                                readingStatus: st.id,
+                              })
+                            }
+                            className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-[11px] font-medium border transition ${
+                              isCurrent
+                                ? st.id === 'COMPLETED'
+                                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : st.id === 'READING'
+                                  ? 'border-amber-500 bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                  : 'border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                                : 'border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <Icon className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{st.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* Document Tags Section */}
                   <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
                     <div className="flex items-center justify-between">
@@ -787,7 +1155,8 @@ export const App: React.FC = () => {
                       onClick={() => {
                         setEditingNote(null);
                         setPendingSelection({
-                          pageNumber: targetJump?.page || 1,
+                          documentId: activeDoc.id,
+                          pageNumber: targetJump?.page || activeDoc.lastReadPage || 1,
                           selectedText: '',
                           boundingBox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.16 },
                         });
@@ -868,7 +1237,70 @@ export const App: React.FC = () => {
             </>
           ) : (
             /* Document Explorer Grid/List View */
-            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Continue Reading ("Weiterlesen / Zuletzt gelesen") Shelf */}
+              {!selectedFolderPath && !selectedTagName && !selectedStatusFilter && recentDocuments.length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      Zuletzt gelesen & Weiterlesen
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    {recentDocuments.slice(0, 3).map((doc) => {
+                      const pct = Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100)
+                        )
+                      );
+                      return (
+                        <div
+                          key={`recent-${doc.id}`}
+                          onClick={() => handleOpenDocument(doc.id, doc.lastReadPage || 1)}
+                          className="group cursor-pointer rounded-xl border border-amber-500/30 dark:border-amber-500/20 bg-gradient-to-br from-amber-500/5 via-white to-white dark:from-amber-500/10 dark:via-slate-900 dark:to-slate-900 p-3.5 shadow-xs hover:shadow-md hover:border-amber-500/60 transition flex flex-col justify-between gap-3"
+                        >
+                          <div className="flex items-start justify-between gap-2.5">
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate">
+                                {doc.fileName}
+                              </h3>
+                              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
+                                {doc.relativePath}
+                              </p>
+                            </div>
+                            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-slate-950 font-semibold text-[11px] shadow-xs group-hover:scale-105 transition">
+                              <Play className="w-3 h-3 fill-current" />
+                              S. {doc.lastReadPage || 1}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                              <span>
+                                Seite {doc.lastReadPage || 1} von {doc.pageCount}
+                              </span>
+                              <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                                {pct}%
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                className="h-full bg-amber-500 rounded-full transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {/* Library Header & Status Filter Pills */}
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -885,17 +1317,44 @@ export const App: React.FC = () => {
                   </p>
                 </div>
 
-                {(selectedFolderPath || selectedTagName) && (
-                  <button
-                    onClick={() => {
-                      setSelectedFolderPath('');
-                      setSelectedTagName('');
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700"
-                  >
-                    Reset Filters
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Reading Status Filter Pills */}
+                  <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    {(
+                      [
+                        { value: '', label: 'Alle' },
+                        { value: 'READING', label: 'Am Lesen' },
+                        { value: 'UNREAD', label: 'Ungelesen' },
+                        { value: 'COMPLETED', label: 'Gelesen' },
+                      ] as const
+                    ).map((tab) => (
+                      <button
+                        key={tab.value}
+                        onClick={() => setSelectedStatusFilter(tab.value)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                          selectedStatusFilter === tab.value
+                            ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(selectedFolderPath || selectedTagName || selectedStatusFilter) && (
+                    <button
+                      onClick={() => {
+                        setSelectedFolderPath('');
+                        setSelectedTagName('');
+                        setSelectedStatusFilter('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700"
+                    >
+                      Reset Filters
+                    </button>
+                  )}
+                </div>
               </div>
 
               {documents.length === 0 ? (
@@ -915,12 +1374,19 @@ export const App: React.FC = () => {
                       coverCacheVersion > 0
                         ? { ...doc, lastModifiedFs: `${doc.lastModifiedFs}-v${coverCacheVersion}` }
                         : doc;
+                    const pct = Math.min(
+                      100,
+                      Math.max(
+                        0,
+                        Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100)
+                      )
+                    );
 
                     if (settings.showCovers && settings.coverLayout === 'top') {
                       return (
                         <div
                           key={doc.id}
-                          onClick={() => handleOpenDocument(doc.id, 1)}
+                          onClick={() => handleOpenDocument(doc.id)}
                           className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex flex-col justify-between"
                         >
                           <DocumentCover
@@ -941,26 +1407,35 @@ export const App: React.FC = () => {
                                 <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0 mt-0.5" />
                               </div>
 
-                              {doc.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 pt-1">
-                                  {doc.tags.map((t) => (
-                                    <span
-                                      key={t.id}
-                                      style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                      className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                                    >
-                                      #{t.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              <div className="flex flex-wrap items-center gap-1 pt-1">
+                                {renderStatusBadge(doc)}
+                                {doc.tags.map((t) => (
+                                  <span
+                                    key={t.id}
+                                    style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
+                                    className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                                  >
+                                    #{t.name}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
 
-                            <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">
-                              <span className="font-mono">{doc.pageCount} pages</span>
-                              <span className="font-mono">
-                                {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                              </span>
+                            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                              {doc.readingStatus === 'READING' && (
+                                <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                  <div
+                                    className="h-full bg-amber-500 rounded-full"
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="font-mono">{doc.pageCount} pages</span>
+                                <span className="font-mono">
+                                  {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -971,7 +1446,7 @@ export const App: React.FC = () => {
                       return (
                         <div
                           key={doc.id}
-                          onClick={() => handleOpenDocument(doc.id, 1)}
+                          onClick={() => handleOpenDocument(doc.id)}
                           className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex gap-3.5"
                         >
                           <DocumentCover
@@ -993,26 +1468,35 @@ export const App: React.FC = () => {
                                 <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0 mt-0.5" />
                               </div>
 
-                              {doc.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 pt-0.5">
-                                  {doc.tags.map((t) => (
-                                    <span
-                                      key={t.id}
-                                      style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                      className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                                    >
-                                      #{t.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                {renderStatusBadge(doc)}
+                                {doc.tags.map((t) => (
+                                  <span
+                                    key={t.id}
+                                    style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
+                                    className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                                  >
+                                    #{t.name}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
 
-                            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">
-                              <span className="font-mono">{doc.pageCount} pages</span>
-                              <span className="font-mono">
-                                {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                              </span>
+                            <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                              {doc.readingStatus === 'READING' && (
+                                <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                  <div
+                                    className="h-full bg-amber-500 rounded-full"
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="font-mono">{doc.pageCount} pages</span>
+                                <span className="font-mono">
+                                  {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1022,7 +1506,7 @@ export const App: React.FC = () => {
                     return (
                       <div
                         key={doc.id}
-                        onClick={() => handleOpenDocument(doc.id, 1)}
+                        onClick={() => handleOpenDocument(doc.id)}
                         className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs hover:shadow-md hover:border-blue-500/60 transition flex flex-col justify-between gap-3"
                       >
                         <div className="space-y-2">
@@ -1041,26 +1525,35 @@ export const App: React.FC = () => {
                             <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-blue-500 shrink-0" />
                           </div>
 
-                          {doc.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {doc.tags.map((t) => (
-                                <span
-                                  key={t.id}
-                                  style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
-                                  className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                                >
-                                  #{t.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1 pt-1">
+                            {renderStatusBadge(doc)}
+                            {doc.tags.map((t) => (
+                              <span
+                                key={t.id}
+                                style={{ backgroundColor: `${t.colorHex}22`, color: t.colorHex }}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                              >
+                                #{t.name}
+                              </span>
+                            ))}
+                          </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">
-                          <span className="font-mono">{doc.pageCount} pages</span>
-                          <span className="font-mono">
-                            {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
-                          </span>
+                        <div className="space-y-2 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
+                          {doc.readingStatus === 'READING' && (
+                            <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                className="h-full bg-amber-500 rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                            <span className="font-mono">{doc.pageCount} pages</span>
+                            <span className="font-mono">
+                              {(doc.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1105,8 +1598,10 @@ interface DirectoryTreeItemProps {
   level: number;
   selectedFolderPath: string;
   activeDocId: string | null;
+  secondaryDocId: string | null;
   onSelectFolder: (path: string) => void;
   onSelectFile: (docId: string) => void;
+  onOpenInSplitView: (docId: string) => void;
 }
 
 const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
@@ -1114,38 +1609,65 @@ const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
   level,
   selectedFolderPath,
   activeDocId,
+  secondaryDocId,
   onSelectFolder,
   onSelectFile,
+  onOpenInSplitView,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(level < 2);
 
   if (node.type === 'file') {
     const isSelected = node.documentId !== null && node.documentId === activeDocId;
+    const isSecondary = node.documentId !== null && node.documentId === secondaryDocId;
     return (
-      <button
-        onClick={() => node.documentId && onSelectFile(node.documentId)}
+      <div
         style={{ paddingLeft: `${level * 12 + 10}px` }}
-        className={`w-full flex items-center justify-between pr-2 py-1.5 rounded-lg text-xs transition text-left ${
+        className={`group w-full flex items-center justify-between pr-1.5 py-1 rounded-lg text-xs transition ${
           isSelected
             ? 'bg-blue-600 text-white font-medium'
+            : isSecondary
+            ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-medium'
             : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-600 dark:text-slate-300'
         }`}
         title={node.path}
       >
-        <span className="flex items-center gap-1.5 min-w-0">
+        <button
+          onClick={() => node.documentId && onSelectFile(node.documentId)}
+          className="flex items-center gap-1.5 min-w-0 flex-1 text-left py-0.5"
+        >
           <FileText className="w-3.5 h-3.5 shrink-0 opacity-75" />
           <span className="truncate">{node.name}</span>
-        </span>
-        {node.pageCount !== null && (
-          <span
-            className={`text-[10px] font-mono shrink-0 ml-1.5 ${
-              isSelected ? 'text-blue-100' : 'text-slate-400'
-            }`}
-          >
-            {node.pageCount}p
-          </span>
-        )}
-      </button>
+        </button>
+
+        <div className="flex items-center gap-1 shrink-0 ml-1">
+          {activeDocId && node.documentId && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenInSplitView(node.documentId!);
+              }}
+              className={`opacity-0 group-hover:opacity-100 p-1 rounded transition ${
+                isSelected
+                  ? 'hover:bg-blue-500 text-white'
+                  : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500'
+              }`}
+              title="Im Split-View rechts öffnen"
+            >
+              <Columns2 className="w-3 h-3" />
+            </button>
+          )}
+          {node.pageCount !== null && (
+            <span
+              className={`text-[10px] font-mono ${
+                isSelected ? 'text-blue-100' : 'text-slate-400'
+              }`}
+            >
+              {node.pageCount}p
+            </span>
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -1191,8 +1713,10 @@ const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
               level={level + 1}
               selectedFolderPath={selectedFolderPath}
               activeDocId={activeDocId}
+              secondaryDocId={secondaryDocId}
               onSelectFolder={onSelectFolder}
               onSelectFile={onSelectFile}
+              onOpenInSplitView={onOpenInSplitView}
             />
           ))}
         </div>
@@ -1200,4 +1724,3 @@ const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
     </div>
   );
 };
-

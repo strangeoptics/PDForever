@@ -13,6 +13,9 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitWidthDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -134,6 +137,33 @@ class IngestionAndSearchIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("image/jpeg"));
 
+        // 4c. Test PDF Bookmarks / Table of Contents (TOC) Extraction
+        List<TocItemDto> outline = libraryService.getDocumentOutline(savedDoc.getId());
+        assertThat(outline).hasSize(2);
+        assertThat(outline.get(0).title()).isEqualTo("Chapter 1");
+        assertThat(outline.get(0).pageNumber()).isEqualTo(1);
+        assertThat(outline.get(1).title()).isEqualTo("Chapter 2");
+        assertThat(outline.get(1).pageNumber()).isEqualTo(2);
+
+        // 4d. Test Reading Progress & Status Tracking
+        DocumentDto updatedProgress = libraryService.updateReadingProgress(
+                savedDoc.getId(),
+                new UpdateReadingProgressRequest(2, null)
+        );
+        assertThat(updatedProgress.lastReadPage()).isEqualTo(2);
+        assertThat(updatedProgress.readingStatus()).isEqualTo("READING");
+        assertThat(updatedProgress.lastOpenedAt()).isNotNull();
+
+        List<DocumentDto> recentDocs = libraryService.getRecentDocuments(5);
+        assertThat(recentDocs).extracting(DocumentDto::id).contains(savedDoc.getId());
+
+        DocumentDto completedProgress = libraryService.updateReadingProgress(
+                savedDoc.getId(),
+                new UpdateReadingProgressRequest(2, "COMPLETED")
+        );
+        assertThat(completedProgress.readingStatus()).isEqualTo("COMPLETED");
+        assertThat(libraryService.getDocuments(null, null, "COMPLETED", 0, 10).getTotalElements()).isEqualTo(1);
+
         // 5. Test Tags & ReadingNotes (Lesezettel) with normalized bounding boxes
         TagDto tag = libraryService.createTag(new CreateTagRequest("Quantum", "#8b5cf6"));
         DocumentDto docWithTag = libraryService.addTagToDocument(savedDoc.getId(), tag.id());
@@ -197,6 +227,10 @@ class IngestionAndSearchIntegrationTest {
     private void createSamplePdf(Path target, List<String> pageContents) throws IOException {
         try (PDDocument doc = new PDDocument()) {
             PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            PDDocumentOutline outline = new PDDocumentOutline();
+            doc.getDocumentCatalog().setDocumentOutline(outline);
+
+            int idx = 1;
             for (String text : pageContents) {
                 PDPage page = new PDPage();
                 doc.addPage(page);
@@ -207,6 +241,13 @@ class IngestionAndSearchIntegrationTest {
                     contentStream.showText(text);
                     contentStream.endText();
                 }
+
+                PDPageFitWidthDestination dest = new PDPageFitWidthDestination();
+                dest.setPage(page);
+                PDOutlineItem bookmark = new PDOutlineItem();
+                bookmark.setDestination(dest);
+                bookmark.setTitle("Chapter " + idx++);
+                outline.addLast(bookmark);
             }
             doc.save(target.toFile());
         }
