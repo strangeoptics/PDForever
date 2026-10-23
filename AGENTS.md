@@ -123,6 +123,7 @@ Run from the repository root:
 8. **Automatic Metadata Enrichment (`MetadataEnrichmentService`)**:
    - Strictly non-destructive (never modifies PDF files on disk).
    - Automatically parses the first 1–3 pages (plus filename and `PDDocumentInformation`) for DOIs and checksum-validated ISBN-13 / ISBN-10 identifiers.
+   - Extracts `publicationYear` from filename patterns such as `1.23` (`01.2023`), `12.24` (`12.2024`), or 4-digit years (`2021`), as well as directory segments such as `/2023` (`extractYearFromPathOrFileName`).
    - Queries free open APIs (**CrossRef**, **Semantic Scholar**, **OpenLibrary**) for `metaTitle`, `authors`, `publicationYear`, and `abstractText` (configurable via `library.metadata-lookup-enabled` in `application.yml`).
    - Endpoints: `POST /api/documents/{id}/enrich`, `PUT /api/documents/{id}/metadata`, and `POST /api/documents/enrich-all?force=...`.
 9. **Faceted Discovery & Filtered Lucene Search (`DocumentFilterCriteria` & `DocumentFacetsDto`)**:

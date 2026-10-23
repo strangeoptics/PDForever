@@ -63,6 +63,20 @@ public class MetadataEnrichmentService {
 
     private static final Pattern YEAR_PATTERN = Pattern.compile("\\b(18\\d{2}|19\\d{2}|20\\d{2})\\b");
 
+    /**
+     * Matches month/issue + year patterns in filenames such as "1.23" (for 01.2023), "01.23", "12.24", or "01.2023".
+     */
+    private static final Pattern FILENAME_MONTH_YEAR_PATTERN = Pattern.compile(
+            "(?:^|[_\\s\\-.,(\\[])(0?[1-9]|1[0-2])\\.(\\d{2}|19\\d{2}|20[0-3]\\d)(?=$|[_\\s\\-.,)\\]])"
+    );
+
+    /**
+     * Matches standalone 4-digit years (1900-2039) in directory names or filenames.
+     */
+    private static final Pattern PATH_OR_FILENAME_YEAR_PATTERN = Pattern.compile(
+            "(?:^|[/\\\\_\\s\\-.,(\\[])(19\\d{2}|20[0-3]\\d)(?=$|[/\\\\_\\s\\-.,)\\]])"
+    );
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
@@ -151,6 +165,10 @@ public class MetadataEnrichmentService {
             Optional<EnrichedMetadata> doiMeta = lookupByDoi(detectedDoi);
             if (doiMeta.isPresent()) {
                 applyMetadataToDocument(doc, doiMeta.get());
+                if (doc.getPublicationYear() == null) {
+                    extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                            .ifPresent(doc::setPublicationYear);
+                }
                 return true;
             }
         }
@@ -160,12 +178,18 @@ public class MetadataEnrichmentService {
             Optional<EnrichedMetadata> isbnMeta = lookupByIsbn(detectedIsbn);
             if (isbnMeta.isPresent()) {
                 applyMetadataToDocument(doc, isbnMeta.get());
+                if (doc.getPublicationYear() == null) {
+                    extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                            .ifPresent(doc::setPublicationYear);
+                }
                 return true;
             }
         }
 
-        // 3. Fallback to embedded PDF DocumentInformation or first-page heuristic if not yet enriched
-        if (force || doc.getMetadataSource() == null || "PDF_INFO".equals(doc.getMetadataSource())) {
+        Integer pathOrFileYear = extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName()).orElse(null);
+
+        // 3. Fallback to path/filename year heuristic and embedded PDF DocumentInformation if not yet enriched
+        if (force || doc.getMetadataSource() == null || "PDF_INFO".equals(doc.getMetadataSource()) || "PATH_HEURISTIC".equals(doc.getMetadataSource())) {
             if (embeddedMeta.title() != null && (doc.getMetaTitle() == null || doc.getMetaTitle().isBlank())) {
                 doc.setMetaTitle(embeddedMeta.title());
                 changed = true;
@@ -174,8 +198,9 @@ public class MetadataEnrichmentService {
                 doc.setAuthors(embeddedMeta.authors());
                 changed = true;
             }
-            if (embeddedMeta.year() != null && doc.getPublicationYear() == null) {
-                doc.setPublicationYear(embeddedMeta.year());
+            Integer resolvedYear = pathOrFileYear != null ? pathOrFileYear : embeddedMeta.year();
+            if (resolvedYear != null && (doc.getPublicationYear() == null || (!"MANUAL".equals(doc.getMetadataSource()) && pathOrFileYear != null && !pathOrFileYear.equals(doc.getPublicationYear())))) {
+                doc.setPublicationYear(resolvedYear);
                 changed = true;
             }
             if (embeddedMeta.subject() != null && (doc.getAbstractText() == null || doc.getAbstractText().isBlank())) {
@@ -183,12 +208,99 @@ public class MetadataEnrichmentService {
                 changed = true;
             }
             if (changed) {
-                doc.setMetadataSource("PDF_INFO");
+                doc.setMetadataSource(pathOrFileYear != null && embeddedMeta.title() == null ? "PATH_HEURISTIC" : "PDF_INFO");
                 doc.setMetadataEnrichedAt(Instant.now());
             }
         }
 
         return changed;
+    }
+
+    /**
+     * Extracts a publication year from the relative directory path (e.g. "/2023/...")
+     * or filename (e.g. "1.23" -> 2023 for 01.2023, "12.24" -> 2024, or "2021").
+     */
+    public Optional<Integer> extractYearFromPathOrFileName(String relativePath, String fileName) {
+        String normRel = relativePath != null ? relativePath.replace('\\', '/').strip() : "";
+        String rawName = fileName != null && !fileName.isBlank() ? fileName.strip() : "";
+        if (rawName.isEmpty() && !normRel.isEmpty()) {
+            int lastSlash = normRel.lastIndexOf('/');
+            rawName = lastSlash >= 0 ? normRel.substring(lastSlash + 1) : normRel;
+        }
+        String nameWithoutExt = rawName.toLowerCase().endsWith(".pdf")
+                ? rawName.substring(0, rawName.length() - 4)
+                : rawName;
+
+        // 1. Check filename for explicit "M.YY" / "MM.YY" / "MM.YYYY" pattern (e.g. "1.23" -> 2023)
+        Matcher monthYearMatcher = FILENAME_MONTH_YEAR_PATTERN.matcher(nameWithoutExt);
+        if (monthYearMatcher.find()) {
+            String yearPart = monthYearMatcher.group(2);
+            Integer parsed = normalizeTwoOrFourDigitYear(yearPart);
+            if (parsed != null) {
+                return Optional.of(parsed);
+            }
+        }
+
+        // Also check the raw filename inside relativePath in case FileNameCleaner altered something
+        if (!normRel.isEmpty()) {
+            int lastSlash = normRel.lastIndexOf('/');
+            String relFileName = lastSlash >= 0 ? normRel.substring(lastSlash + 1) : normRel;
+            if (relFileName.toLowerCase().endsWith(".pdf")) {
+                relFileName = relFileName.substring(0, relFileName.length() - 4);
+            }
+            Matcher relMonthYearMatcher = FILENAME_MONTH_YEAR_PATTERN.matcher(relFileName);
+            if (relMonthYearMatcher.find()) {
+                Integer parsed = normalizeTwoOrFourDigitYear(relMonthYearMatcher.group(2));
+                if (parsed != null) {
+                    return Optional.of(parsed);
+                }
+            }
+        }
+
+        // 2. Check directory segments in relativePath (e.g. "Magazines/2023/file.pdf" or "2023/file.pdf")
+        if (normRel.contains("/")) {
+            String dirPath = normRel.substring(0, normRel.lastIndexOf('/'));
+            String[] segments = dirPath.split("/");
+            for (int i = segments.length - 1; i >= 0; i--) {
+                String seg = segments[i].strip();
+                if (seg.matches("19\\d{2}|20[0-3]\\d")) {
+                    return Optional.of(Integer.parseInt(seg));
+                }
+                Matcher segMatcher = PATH_OR_FILENAME_YEAR_PATTERN.matcher(seg);
+                if (segMatcher.find()) {
+                    return Optional.of(Integer.parseInt(segMatcher.group(1)));
+                }
+            }
+        }
+
+        // 3. Check filename for a standalone 4-digit year (e.g. "Berlin, 2021") after stripping any ISBNs
+        String nameWithoutIsbn = ISBN13_STANDALONE_PATTERN.matcher(nameWithoutExt).replaceAll(" ");
+        Matcher fileYearMatcher = PATH_OR_FILENAME_YEAR_PATTERN.matcher(nameWithoutIsbn);
+        Integer lastMatchedYear = null;
+        while (fileYearMatcher.find()) {
+            lastMatchedYear = Integer.parseInt(fileYearMatcher.group(1));
+        }
+        return Optional.ofNullable(lastMatchedYear);
+    }
+
+    private Integer normalizeTwoOrFourDigitYear(String yearStr) {
+        if (yearStr == null || yearStr.isBlank()) return null;
+        try {
+            int val = Integer.parseInt(yearStr.strip());
+            if (yearStr.length() == 2) {
+                if (val <= 39) {
+                    return 2000 + val;
+                } else if (val >= 70) {
+                    return 1900 + val;
+                }
+                return null;
+            }
+            if (val >= 1900 && val <= 2039) {
+                return val;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return null;
     }
 
     private void applyMetadataToDocument(Document doc, EnrichedMetadata meta) {

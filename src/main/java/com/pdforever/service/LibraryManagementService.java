@@ -166,7 +166,7 @@ public class LibraryManagementService {
                 }
             }
 
-            Integer pubYear = doc.getPublicationYear();
+            Integer pubYear = resolvePublicationYear(doc);
             if (pubYear != null && pubYear > 0) {
                 minPubYear = (minPubYear == null) ? pubYear : Math.min(minPubYear, pubYear);
                 maxPubYear = (maxPubYear == null) ? pubYear : Math.max(maxPubYear, pubYear);
@@ -289,13 +289,14 @@ public class LibraryManagementService {
                 }
             }
 
+            Integer docYear = resolvePublicationYear(doc);
             if (c.yearFrom() != null) {
-                if (doc.getPublicationYear() == null || doc.getPublicationYear() < c.yearFrom()) {
+                if (docYear == null || docYear < c.yearFrom()) {
                     continue;
                 }
             }
             if (c.yearTo() != null) {
-                if (doc.getPublicationYear() == null || doc.getPublicationYear() > c.yearTo()) {
+                if (docYear == null || docYear > c.yearTo()) {
                     continue;
                 }
             }
@@ -331,7 +332,10 @@ public class LibraryManagementService {
                     (Document d) -> d.getPageCount() != null ? d.getPageCount() : 0
             );
             case "publicationYear", "year" -> Comparator.comparingInt(
-                    (Document d) -> d.getPublicationYear() != null ? d.getPublicationYear() : 0
+                    (Document d) -> {
+                        Integer y = resolvePublicationYear(d);
+                        return y != null ? y : 0;
+                    }
             );
             case "noteCount", "notes" -> Comparator.comparingInt(
                     (Document d) -> notesByDocId.getOrDefault(d.getId(), List.of()).size()
@@ -357,6 +361,15 @@ public class LibraryManagementService {
                 d -> d.getFileName() != null ? d.getFileName() : "",
                 String.CASE_INSENSITIVE_ORDER
         );
+    }
+
+    private Integer resolvePublicationYear(Document doc) {
+        if (doc.getPublicationYear() != null && doc.getPublicationYear() > 0) {
+            return doc.getPublicationYear();
+        }
+        return metadataEnrichmentService
+                .extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                .orElse(null);
     }
 
     private boolean hasEnrichedMetadata(Document doc) {
@@ -718,7 +731,7 @@ public class LibraryManagementService {
                 doc.getIsbn(),
                 doc.getMetaTitle(),
                 doc.getAuthors(),
-                doc.getPublicationYear(),
+                resolvePublicationYear(doc),
                 doc.getAbstractText(),
                 doc.getMetadataSource(),
                 doc.getMetadataEnrichedAt(),

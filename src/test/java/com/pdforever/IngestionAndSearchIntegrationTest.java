@@ -304,12 +304,27 @@ class IngestionAndSearchIntegrationTest {
         boolean stable = fileWatcherService.waitForFileSizeStability(debouncedFile, 50L, 4);
         assertThat(stable).isTrue();
 
-        // 9. Verify FileNameCleaner rules
+        // 9. Verify FileNameCleaner rules and publication year extraction from filename (1.23 -> 2023) and directory (/2023 -> 2023)
         assertThat(fileNameCleaner.cleanFileName("Essen_und_Trinken_Fur_jeden_Tag_1.23_de.downmagaz.net.pdf"))
                 .isEqualTo("Essen_und_Trinken_Fur_jeden_Tag_1.23.pdf");
         assertThat(fileNameCleaner.cleanFileName(
                 "Ethnologie - Biographie einer Kulturwissenschaft -- Roman Loimeier; Dietrich-Reimer-Verlag -- 1_ Auflage, Berlin, 2021 -- Dietrich Reimer Verlag GmbH -- 9783496016663  -- Anna's A.pdf"
         )).isEqualTo("Ethnologie - Biographie einer Kulturwissenschaft -- Roman Loimeier; Dietrich-Reimer-Verlag -- 1_ Auflage, Berlin, 2021.pdf");
+
+        assertThat(metadataEnrichmentService.extractYearFromPathOrFileName(
+                "Magazines/Essen_und_Trinken_Fur_jeden_Tag_1.23_de.downmagaz.net.pdf",
+                "Essen_und_Trinken_Fur_jeden_Tag_1.23.pdf"
+        )).contains(2023);
+
+        assertThat(metadataEnrichmentService.extractYearFromPathOrFileName(
+                "2023/Rezepte_Ausgabe.pdf",
+                "Rezepte_Ausgabe.pdf"
+        )).contains(2023);
+
+        assertThat(metadataEnrichmentService.extractYearFromPathOrFileName(
+                "Archiv/2024/Heft_Sonderausgabe.pdf",
+                "Heft_Sonderausgabe.pdf"
+        )).contains(2024);
     }
 
     private void createSamplePdf(Path target, List<String> pageContents) throws IOException {
