@@ -23,7 +23,8 @@ public record DocumentDto(
         Integer publicationYear,
         String abstractText,
         String metadataSource,
-        Instant metadataEnrichedAt
+        Instant metadataEnrichedAt,
+        int noteCount
 ) {
 }
 

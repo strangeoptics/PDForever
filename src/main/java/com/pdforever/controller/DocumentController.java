@@ -1,6 +1,8 @@
 package com.pdforever.controller;
 
 import com.pdforever.dto.DocumentDto;
+import com.pdforever.dto.DocumentFacetsDto;
+import com.pdforever.dto.DocumentFilterCriteria;
 import com.pdforever.dto.MetadataEnrichmentReportDto;
 import com.pdforever.dto.TocItemDto;
 import com.pdforever.dto.TreeNodeDto;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,10 +62,44 @@ public class DocumentController {
             @RequestParam(required = false) String path,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer minPages,
+            @RequestParam(required = false) Integer maxPages,
+            @RequestParam(required = false) Boolean hasNotes,
+            @RequestParam(required = false) String noteQuery,
+            @RequestParam(required = false) Instant modifiedAfter,
+            @RequestParam(required = false) Instant modifiedBefore,
+            @RequestParam(required = false) Integer yearFrom,
+            @RequestParam(required = false) Integer yearTo,
+            @RequestParam(required = false) Boolean hasMetadata,
+            @RequestParam(defaultValue = "fileName") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
-        return libraryService.getDocuments(path, tag, status, page, size);
+        DocumentFilterCriteria criteria = new DocumentFilterCriteria(
+                path,
+                tag,
+                status,
+                minPages,
+                maxPages,
+                hasNotes,
+                noteQuery,
+                modifiedAfter,
+                modifiedBefore,
+                yearFrom,
+                yearTo,
+                hasMetadata,
+                sortBy,
+                sortDir
+        );
+        return libraryService.getDocuments(criteria, page, size);
+    }
+
+    @GetMapping("/documents/facets")
+    public DocumentFacetsDto getDocumentFacets(
+            @RequestParam(required = false) String path
+    ) {
+        return libraryService.getDocumentFacets(path);
     }
 
     @GetMapping("/documents/recent")

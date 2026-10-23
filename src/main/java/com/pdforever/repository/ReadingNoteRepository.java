@@ -14,6 +14,15 @@ public interface ReadingNoteRepository extends JpaRepository<ReadingNote, UUID> 
 
     List<ReadingNote> findAllByDocumentIdOrderByPageNumberAscCreatedAtAsc(UUID documentId);
 
+    int countByDocumentId(UUID documentId);
+
+    @Query("""
+            SELECT n FROM ReadingNote n
+            JOIN FETCH n.document d
+            WHERE d.isDeleted = false
+            """)
+    List<ReadingNote> findAllForActiveDocuments();
+
     @Query("""
             SELECT n FROM ReadingNote n
             JOIN FETCH n.document d

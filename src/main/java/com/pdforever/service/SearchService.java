@@ -1,5 +1,6 @@
 package com.pdforever.service;
 
+import com.pdforever.dto.DocumentFilterCriteria;
 import com.pdforever.dto.SearchResultGroupDto;
 import com.pdforever.dto.SearchResultGroupDto.PageMatchDto;
 import org.apache.lucene.document.Document;
@@ -10,6 +11,7 @@ import org.apache.lucene.search.*;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.search.uhighlight.DefaultPassageFormatter;
 import org.apache.lucene.search.uhighlight.UnifiedHighlighter;
+import org.apache.lucene.util.BytesRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,15 +29,33 @@ public class SearchService {
 
     private final LuceneIndexService luceneIndexService;
     private final FileNameCleaner fileNameCleaner;
+    private final LibraryManagementService libraryManagementService;
 
-    public SearchService(LuceneIndexService luceneIndexService, FileNameCleaner fileNameCleaner) {
+    public SearchService(
+            LuceneIndexService luceneIndexService,
+            FileNameCleaner fileNameCleaner,
+            LibraryManagementService libraryManagementService
+    ) {
         this.luceneIndexService = luceneIndexService;
         this.fileNameCleaner = fileNameCleaner;
+        this.libraryManagementService = libraryManagementService;
     }
 
     public List<SearchResultGroupDto> search(String rawQuery) {
+        return search(rawQuery, DocumentFilterCriteria.empty());
+    }
+
+    public List<SearchResultGroupDto> search(String rawQuery, DocumentFilterCriteria criteria) {
         if (rawQuery == null || rawQuery.isBlank()) {
             return Collections.emptyList();
+        }
+
+        Set<UUID> allowedDocIds = null;
+        if (criteria != null && criteria.hasAnyFilter()) {
+            allowedDocIds = libraryManagementService.findMatchingDocumentIds(criteria);
+            if (allowedDocIds.isEmpty()) {
+                return Collections.emptyList();
+            }
         }
 
         SearcherManager searcherManager = luceneIndexService.getSearcherManager();
@@ -45,14 +65,25 @@ public class SearchService {
             searcher = searcherManager.acquire();
             searcher.setSimilarity(new BM25Similarity());
 
-            Query query = buildQuery(rawQuery.strip());
-            TopDocs topDocs = searcher.search(query, MAX_PAGE_HITS);
+            Query textQuery = buildQuery(rawQuery.strip());
+            Query executedQuery = textQuery;
+            if (allowedDocIds != null) {
+                List<BytesRef> docIdTerms = allowedDocIds.stream()
+                        .map(id -> new BytesRef(id.toString()))
+                        .toList();
+                BooleanQuery.Builder filteredBuilder = new BooleanQuery.Builder();
+                filteredBuilder.add(textQuery, BooleanClause.Occur.MUST);
+                filteredBuilder.add(new TermInSetQuery(FIELD_DOC_ID, docIdTerms), BooleanClause.Occur.FILTER);
+                executedQuery = filteredBuilder.build();
+            }
+
+            TopDocs topDocs = searcher.search(executedQuery, MAX_PAGE_HITS);
             if (topDocs.scoreDocs.length == 0) {
                 return Collections.emptyList();
             }
 
             UnifiedHighlighter highlighter = createHighlighter(searcher);
-            String[] snippets = highlighter.highlight(FIELD_CONTENT, query, topDocs, 2);
+            String[] snippets = highlighter.highlight(FIELD_CONTENT, textQuery, topDocs, 2);
 
             Map<UUID, GroupAccumulator> grouped = new LinkedHashMap<>();
 

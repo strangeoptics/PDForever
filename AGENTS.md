@@ -125,6 +125,10 @@ Run from the repository root:
    - Automatically parses the first 1–3 pages (plus filename and `PDDocumentInformation`) for DOIs and checksum-validated ISBN-13 / ISBN-10 identifiers.
    - Queries free open APIs (**CrossRef**, **Semantic Scholar**, **OpenLibrary**) for `metaTitle`, `authors`, `publicationYear`, and `abstractText` (configurable via `library.metadata-lookup-enabled` in `application.yml`).
    - Endpoints: `POST /api/documents/{id}/enrich`, `PUT /api/documents/{id}/metadata`, and `POST /api/documents/enrich-all?force=...`.
+9. **Faceted Discovery & Filtered Lucene Search (`DocumentFilterCriteria` & `DocumentFacetsDto`)**:
+   - `GET /api/documents` and `GET /api/search` accept faceted filter parameters: `path`, `tag` (single or comma-separated multi-tag), `status`, `minPages`, `maxPages`, `hasNotes`, `noteQuery` ("PDFs with notes about topic X"), `modifiedAfter`, `modifiedBefore`, `yearFrom`, `yearTo`, `hasMetadata`, `sortBy`, and `sortDir`.
+   - `GET /api/documents/facets` computes live facet counts (status counts, `withNotesCount`, `totalNotesCount`, `withMetadataCount`, page buckets `1–20` / `21–100` / `101+`, min/max pages and publication years, and per-tag document counts).
+   - In `SearchService`, active facets restrict fulltext Lucene queries via `TermInSetQuery(FIELD_DOC_ID, ...)` with `BooleanClause.Occur.FILTER` while preserving `UnifiedHighlighter` snippet highlighting on `FIELD_CONTENT`.
 
 ### Frontend Rules
 1. **Build Artifacts**:

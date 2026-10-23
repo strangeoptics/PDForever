@@ -1,5 +1,7 @@
 import {
   CreateNotePayload,
+  DocumentFacets,
+  DocumentFilterParams,
   DocumentItem,
   MetadataEnrichmentReport,
   PaginatedResponse,
@@ -32,20 +34,32 @@ export const api = {
     return fetch(`${API_BASE}/tree/reconcile`, { method: 'POST' }).then(handleJson<TreeNode>);
   },
 
-  getDocuments(params: {
-    path?: string;
-    tag?: string;
-    status?: string;
-    page?: number;
-    size?: number;
-  }): Promise<PaginatedResponse<DocumentItem>> {
+  getDocuments(params: DocumentFilterParams): Promise<PaginatedResponse<DocumentItem>> {
     const sp = new URLSearchParams();
     if (params.path) sp.set('path', params.path);
     if (params.tag) sp.set('tag', params.tag);
     if (params.status) sp.set('status', params.status);
+    if (params.minPages != null) sp.set('minPages', String(params.minPages));
+    if (params.maxPages != null) sp.set('maxPages', String(params.maxPages));
+    if (params.hasNotes != null) sp.set('hasNotes', String(params.hasNotes));
+    if (params.noteQuery && params.noteQuery.trim()) sp.set('noteQuery', params.noteQuery.trim());
+    if (params.modifiedAfter) sp.set('modifiedAfter', params.modifiedAfter);
+    if (params.modifiedBefore) sp.set('modifiedBefore', params.modifiedBefore);
+    if (params.yearFrom != null) sp.set('yearFrom', String(params.yearFrom));
+    if (params.yearTo != null) sp.set('yearTo', String(params.yearTo));
+    if (params.hasMetadata != null) sp.set('hasMetadata', String(params.hasMetadata));
+    if (params.sortBy) sp.set('sortBy', params.sortBy);
+    if (params.sortDir) sp.set('sortDir', params.sortDir);
     sp.set('page', String(params.page ?? 0));
     sp.set('size', String(params.size ?? 50));
     return fetch(`${API_BASE}/documents?${sp.toString()}`).then(handleJson<PaginatedResponse<DocumentItem>>);
+  },
+
+  getDocumentFacets(path?: string): Promise<DocumentFacets> {
+    const sp = new URLSearchParams();
+    if (path) sp.set('path', path);
+    const qs = sp.toString();
+    return fetch(`${API_BASE}/documents/facets${qs ? `?${qs}` : ''}`).then(handleJson<DocumentFacets>);
   },
 
   getRecentDocuments(limit = 6): Promise<DocumentItem[]> {
@@ -103,8 +117,22 @@ export const api = {
     );
   },
 
-  searchLucene(query: string): Promise<SearchResultGroup[]> {
+  searchLucene(query: string, filters?: DocumentFilterParams): Promise<SearchResultGroup[]> {
     const sp = new URLSearchParams({ q: query });
+    if (filters) {
+      if (filters.path) sp.set('path', filters.path);
+      if (filters.tag) sp.set('tag', filters.tag);
+      if (filters.status) sp.set('status', filters.status);
+      if (filters.minPages != null) sp.set('minPages', String(filters.minPages));
+      if (filters.maxPages != null) sp.set('maxPages', String(filters.maxPages));
+      if (filters.hasNotes != null) sp.set('hasNotes', String(filters.hasNotes));
+      if (filters.noteQuery && filters.noteQuery.trim()) sp.set('noteQuery', filters.noteQuery.trim());
+      if (filters.modifiedAfter) sp.set('modifiedAfter', filters.modifiedAfter);
+      if (filters.modifiedBefore) sp.set('modifiedBefore', filters.modifiedBefore);
+      if (filters.yearFrom != null) sp.set('yearFrom', String(filters.yearFrom));
+      if (filters.yearTo != null) sp.set('yearTo', String(filters.yearTo));
+      if (filters.hasMetadata != null) sp.set('hasMetadata', String(filters.hasMetadata));
+    }
     return fetch(`${API_BASE}/search?${sp.toString()}`).then(handleJson<SearchResultGroup[]>);
   },
 

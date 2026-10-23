@@ -237,6 +237,40 @@ class IngestionAndSearchIntegrationTest {
         assertThat(foundNotes).hasSize(1);
         assertThat(foundNotes.getFirst().id()).isEqualTo(note.id());
 
+        // 5b. Test Faceted Discovery Filters (tags, page count range, hasNotes, noteQuery, modifiedAfter, publicationYear)
+        DocumentFacetsDto facets = libraryService.getDocumentFacets(null);
+        assertThat(facets.totalDocuments()).isEqualTo(1);
+        assertThat(facets.completedCount()).isEqualTo(1);
+        assertThat(facets.withNotesCount()).isEqualTo(1);
+        assertThat(facets.totalNotesCount()).isEqualTo(1);
+        assertThat(facets.withMetadataCount()).isEqualTo(1);
+        assertThat(facets.shortDocsCount()).isEqualTo(1);
+
+        DocumentFilterCriteria matchingCriteria = new DocumentFilterCriteria(
+                "Science",
+                "Quantum",
+                "COMPLETED",
+                1,
+                10,
+                true,
+                "anyons",
+                Instant.now().minusSeconds(3600),
+                Instant.now().plusSeconds(3600),
+                2015,
+                2025,
+                true,
+                "pageCount",
+                "desc"
+        );
+        assertThat(libraryService.getDocuments(matchingCriteria, 0, 10).getTotalElements()).isEqualTo(1);
+        assertThat(searchService.search("superconducting", matchingCriteria)).hasSize(1);
+
+        DocumentFilterCriteria nonMatchingNoteTopic = new DocumentFilterCriteria(
+                null, null, null, null, null, true, "nonexistent-topic-xyz", null, null, null, null, null, "fileName", "asc"
+        );
+        assertThat(libraryService.getDocuments(nonMatchingNoteTopic, 0, 10).getTotalElements()).isEqualTo(0);
+        assertThat(searchService.search("superconducting", nonMatchingNoteTopic)).isEmpty();
+
         // 6. Modify the PDF on disk and verify re-indexing
         createSamplePdf(pdfFile, List.of(
                 "Updated first page Content.",

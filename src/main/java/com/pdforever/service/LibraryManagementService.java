@@ -10,6 +10,7 @@ import com.pdforever.repository.DocumentRepository;
 import com.pdforever.repository.ReadingNoteRepository;
 import com.pdforever.repository.TagRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -20,11 +21,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -63,23 +70,327 @@ public class LibraryManagementService {
 
     @Transactional(readOnly = true)
     public Page<DocumentDto> getDocuments(String path, String tag, String status, int page, int size) {
-        String normalizedPath = path != null ? path.replace('\\', '/').strip() : null;
-        if (normalizedPath != null && normalizedPath.startsWith("/")) {
-            normalizedPath = normalizedPath.substring(1);
-        }
-        if (normalizedPath != null && normalizedPath.endsWith("/")) {
-            normalizedPath = normalizedPath.substring(0, normalizedPath.length() - 1);
-        }
-        String normalizedTag = tag != null ? tag.strip() : null;
-        String normalizedStatus = status != null && !status.isBlank() ? status.strip().toUpperCase(Locale.ROOT) : null;
-
-        Page<Document> docs = documentRepository.findFilteredDocuments(
-                normalizedPath,
-                normalizedTag,
-                normalizedStatus,
-                PageRequest.of(Math.max(0, page), Math.clamp(size, 1, 200))
+        DocumentFilterCriteria criteria = new DocumentFilterCriteria(
+                path, tag, status, null, null, null, null, null, null, null, null, null, "fileName", "asc"
         );
-        return docs.map(this::toDocumentDto);
+        return getDocuments(criteria, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<DocumentDto> getDocuments(DocumentFilterCriteria criteria, int page, int size) {
+        List<Document> activeDocs = documentRepository.findAllByIsDeletedFalseOrderByRelativePathAsc();
+        Map<UUID, List<ReadingNote>> notesByDocId = loadNotesByDocumentMap();
+
+        List<Document> filtered = filterAndSortDocuments(activeDocs, notesByDocId, criteria);
+
+        int clampedPage = Math.max(0, page);
+        int clampedSize = Math.clamp(size, 1, 200);
+        int total = filtered.size();
+        int fromIndex = Math.min(clampedPage * clampedSize, total);
+        int toIndex = Math.min(fromIndex + clampedSize, total);
+
+        List<DocumentDto> pageContent = filtered.subList(fromIndex, toIndex).stream()
+                .map(doc -> toDocumentDto(doc, notesByDocId.getOrDefault(doc.getId(), List.of()).size()))
+                .toList();
+
+        return new PageImpl<>(pageContent, PageRequest.of(clampedPage, clampedSize), total);
+    }
+
+    @Transactional(readOnly = true)
+    public Set<UUID> findMatchingDocumentIds(DocumentFilterCriteria criteria) {
+        List<Document> activeDocs = documentRepository.findAllByIsDeletedFalseOrderByRelativePathAsc();
+        Map<UUID, List<ReadingNote>> notesByDocId = loadNotesByDocumentMap();
+        return filterAndSortDocuments(activeDocs, notesByDocId, criteria).stream()
+                .map(Document::getId)
+                .collect(Collectors.toSet());
+    }
+
+    @Transactional(readOnly = true)
+    public DocumentFacetsDto getDocumentFacets(String path) {
+        List<Document> activeDocs = documentRepository.findAllByIsDeletedFalseOrderByRelativePathAsc();
+        String normPath = normalizePathPrefix(path);
+        if (normPath != null && !normPath.isEmpty()) {
+            activeDocs = activeDocs.stream()
+                    .filter(d -> matchesPathPrefix(d.getRelativePath(), normPath))
+                    .toList();
+        }
+
+        Map<UUID, List<ReadingNote>> notesByDocId = loadNotesByDocumentMap();
+        List<Tag> allTags = tagRepository.findAllByOrderByNameAsc();
+        Map<Long, Integer> tagCounts = new HashMap<>();
+
+        int unreadCount = 0;
+        int readingCount = 0;
+        int completedCount = 0;
+        int withNotesCount = 0;
+        int totalNotesCount = 0;
+        int withMetadataCount = 0;
+        int shortDocsCount = 0;
+        int mediumDocsCount = 0;
+        int longDocsCount = 0;
+        int minPageCount = Integer.MAX_VALUE;
+        int maxPageCount = 0;
+        Integer minPubYear = null;
+        Integer maxPubYear = null;
+
+        for (Document doc : activeDocs) {
+            String st = doc.getReadingStatus();
+            if ("COMPLETED".equalsIgnoreCase(st)) {
+                completedCount++;
+            } else if ("READING".equalsIgnoreCase(st)) {
+                readingCount++;
+            } else {
+                unreadCount++;
+            }
+
+            int nCount = notesByDocId.getOrDefault(doc.getId(), List.of()).size();
+            if (nCount > 0) {
+                withNotesCount++;
+                totalNotesCount += nCount;
+            }
+
+            if (hasEnrichedMetadata(doc)) {
+                withMetadataCount++;
+            }
+
+            int pages = doc.getPageCount() != null ? doc.getPageCount() : 0;
+            if (pages > 0) {
+                minPageCount = Math.min(minPageCount, pages);
+                maxPageCount = Math.max(maxPageCount, pages);
+                if (pages <= 20) {
+                    shortDocsCount++;
+                } else if (pages <= 100) {
+                    mediumDocsCount++;
+                } else {
+                    longDocsCount++;
+                }
+            }
+
+            Integer pubYear = doc.getPublicationYear();
+            if (pubYear != null && pubYear > 0) {
+                minPubYear = (minPubYear == null) ? pubYear : Math.min(minPubYear, pubYear);
+                maxPubYear = (maxPubYear == null) ? pubYear : Math.max(maxPubYear, pubYear);
+            }
+
+            for (Tag t : doc.getTags()) {
+                tagCounts.merge(t.getId(), 1, Integer::sum);
+            }
+        }
+
+        if (minPageCount == Integer.MAX_VALUE) {
+            minPageCount = 0;
+        }
+
+        List<DocumentFacetsDto.TagFacetDto> tagFacets = allTags.stream()
+                .map(t -> new DocumentFacetsDto.TagFacetDto(
+                        t.getId(),
+                        t.getName(),
+                        t.getColorHex(),
+                        tagCounts.getOrDefault(t.getId(), 0)
+                ))
+                .toList();
+
+        return new DocumentFacetsDto(
+                activeDocs.size(),
+                unreadCount,
+                readingCount,
+                completedCount,
+                withNotesCount,
+                totalNotesCount,
+                withMetadataCount,
+                shortDocsCount,
+                mediumDocsCount,
+                longDocsCount,
+                minPageCount,
+                maxPageCount,
+                minPubYear,
+                maxPubYear,
+                tagFacets
+        );
+    }
+
+    private Map<UUID, List<ReadingNote>> loadNotesByDocumentMap() {
+        List<ReadingNote> allNotes = noteRepository.findAllForActiveDocuments();
+        Map<UUID, List<ReadingNote>> map = new HashMap<>();
+        for (ReadingNote note : allNotes) {
+            if (note.getDocument() != null && note.getDocument().getId() != null) {
+                map.computeIfAbsent(note.getDocument().getId(), k -> new ArrayList<>()).add(note);
+            }
+        }
+        return map;
+    }
+
+    private List<Document> filterAndSortDocuments(
+            List<Document> docs,
+            Map<UUID, List<ReadingNote>> notesByDocId,
+            DocumentFilterCriteria criteria
+    ) {
+        DocumentFilterCriteria c = criteria != null ? criteria : DocumentFilterCriteria.empty();
+        String normPath = normalizePathPrefix(c.path());
+        Set<String> requiredTags = parseTagFilterSet(c.tag());
+        String normStatus = c.status() != null && !c.status().isBlank()
+                ? c.status().strip().toUpperCase(Locale.ROOT)
+                : null;
+        String normNoteQuery = c.noteQuery() != null && !c.noteQuery().isBlank()
+                ? c.noteQuery().strip().toLowerCase(Locale.ROOT)
+                : null;
+
+        List<Document> filtered = new ArrayList<>();
+        for (Document doc : docs) {
+            if (normPath != null && !normPath.isEmpty() && !matchesPathPrefix(doc.getRelativePath(), normPath)) {
+                continue;
+            }
+            if (!requiredTags.isEmpty()) {
+                Set<String> docTagNames = doc.getTags().stream()
+                        .map(t -> t.getName().toLowerCase(Locale.ROOT))
+                        .collect(Collectors.toSet());
+                if (!docTagNames.containsAll(requiredTags)) {
+                    continue;
+                }
+            }
+            if (normStatus != null && !normStatus.equalsIgnoreCase(doc.getReadingStatus())) {
+                continue;
+            }
+            int pages = doc.getPageCount() != null ? doc.getPageCount() : 0;
+            if (c.minPages() != null && pages < c.minPages()) {
+                continue;
+            }
+            if (c.maxPages() != null && pages > c.maxPages()) {
+                continue;
+            }
+
+            List<ReadingNote> docNotes = notesByDocId.getOrDefault(doc.getId(), List.of());
+            if (c.hasNotes() != null) {
+                if (c.hasNotes() && docNotes.isEmpty()) {
+                    continue;
+                }
+                if (!c.hasNotes() && !docNotes.isEmpty()) {
+                    continue;
+                }
+            }
+            if (normNoteQuery != null) {
+                boolean noteMatches = docNotes.stream().anyMatch(n ->
+                        (n.getNoteMarkdown() != null && n.getNoteMarkdown().toLowerCase(Locale.ROOT).contains(normNoteQuery))
+                                || (n.getSelectedText() != null && n.getSelectedText().toLowerCase(Locale.ROOT).contains(normNoteQuery))
+                );
+                if (!noteMatches) {
+                    continue;
+                }
+            }
+
+            if (c.modifiedAfter() != null) {
+                if (doc.getLastModifiedFs() == null || doc.getLastModifiedFs().isBefore(c.modifiedAfter())) {
+                    continue;
+                }
+            }
+            if (c.modifiedBefore() != null) {
+                if (doc.getLastModifiedFs() == null || doc.getLastModifiedFs().isAfter(c.modifiedBefore())) {
+                    continue;
+                }
+            }
+
+            if (c.yearFrom() != null) {
+                if (doc.getPublicationYear() == null || doc.getPublicationYear() < c.yearFrom()) {
+                    continue;
+                }
+            }
+            if (c.yearTo() != null) {
+                if (doc.getPublicationYear() == null || doc.getPublicationYear() > c.yearTo()) {
+                    continue;
+                }
+            }
+
+            if (c.hasMetadata() != null) {
+                boolean hasMeta = hasEnrichedMetadata(doc);
+                if (c.hasMetadata() != hasMeta) {
+                    continue;
+                }
+            }
+
+            filtered.add(doc);
+        }
+
+        Comparator<Document> comparator = buildDocumentComparator(c.sortBy(), c.sortDir(), notesByDocId);
+        filtered.sort(comparator);
+        return filtered;
+    }
+
+    private Comparator<Document> buildDocumentComparator(
+            String sortBy,
+            String sortDir,
+            Map<UUID, List<ReadingNote>> notesByDocId
+    ) {
+        String field = sortBy != null ? sortBy.strip() : "fileName";
+        boolean desc = "desc".equalsIgnoreCase(sortDir);
+
+        Comparator<Document> primary = switch (field) {
+            case "lastModifiedFs", "date" -> Comparator.comparing(
+                    (Document d) -> d.getLastModifiedFs() != null ? d.getLastModifiedFs() : Instant.EPOCH
+            );
+            case "pageCount", "pages" -> Comparator.comparingInt(
+                    (Document d) -> d.getPageCount() != null ? d.getPageCount() : 0
+            );
+            case "publicationYear", "year" -> Comparator.comparingInt(
+                    (Document d) -> d.getPublicationYear() != null ? d.getPublicationYear() : 0
+            );
+            case "noteCount", "notes" -> Comparator.comparingInt(
+                    (Document d) -> notesByDocId.getOrDefault(d.getId(), List.of()).size()
+            );
+            case "lastOpenedAt", "recent" -> Comparator.comparing(
+                    (Document d) -> d.getLastOpenedAt() != null ? d.getLastOpenedAt() : Instant.EPOCH
+            );
+            default -> Comparator.comparing(
+                    (Document d) -> {
+                        String title = d.getMetaTitle() != null && !d.getMetaTitle().isBlank()
+                                ? d.getMetaTitle()
+                                : d.getFileName();
+                        return title != null ? title : "";
+                    },
+                    String.CASE_INSENSITIVE_ORDER
+            );
+        };
+
+        if (desc) {
+            primary = primary.reversed();
+        }
+        return primary.thenComparing(
+                d -> d.getFileName() != null ? d.getFileName() : "",
+                String.CASE_INSENSITIVE_ORDER
+        );
+    }
+
+    private boolean hasEnrichedMetadata(Document doc) {
+        return (doc.getDoi() != null && !doc.getDoi().isBlank())
+                || (doc.getIsbn() != null && !doc.getIsbn().isBlank())
+                || (doc.getMetaTitle() != null && !doc.getMetaTitle().isBlank());
+    }
+
+    private String normalizePathPrefix(String path) {
+        if (path == null) return null;
+        String norm = path.replace('\\', '/').strip();
+        while (norm.startsWith("/")) {
+            norm = norm.substring(1);
+        }
+        while (norm.endsWith("/")) {
+            norm = norm.substring(0, norm.length() - 1);
+        }
+        return norm;
+    }
+
+    private boolean matchesPathPrefix(String docRelPath, String normPrefix) {
+        if (docRelPath == null) return false;
+        return docRelPath.equals(normPrefix) || docRelPath.startsWith(normPrefix + "/");
+    }
+
+    private Set<String> parseTagFilterSet(String rawTagParam) {
+        if (rawTagParam == null || rawTagParam.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(rawTagParam.split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(HashSet::new));
     }
 
     @Transactional(readOnly = true)
@@ -382,6 +693,11 @@ public class LibraryManagementService {
     }
 
     public DocumentDto toDocumentDto(Document doc) {
+        int noteCount = doc.getId() != null ? noteRepository.countByDocumentId(doc.getId()) : 0;
+        return toDocumentDto(doc, noteCount);
+    }
+
+    public DocumentDto toDocumentDto(Document doc, int noteCount) {
         List<TagDto> sortedTags = doc.getTags().stream()
                 .sorted(Comparator.comparing(Tag::getName, String.CASE_INSENSITIVE_ORDER))
                 .map(this::toTagDto)
@@ -405,7 +721,8 @@ public class LibraryManagementService {
                 doc.getPublicationYear(),
                 doc.getAbstractText(),
                 doc.getMetadataSource(),
-                doc.getMetadataEnrichedAt()
+                doc.getMetadataEnrichedAt(),
+                noteCount
         );
     }
 

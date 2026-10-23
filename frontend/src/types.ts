@@ -63,6 +63,51 @@ export interface DocumentItem {
   abstractText?: string | null;
   metadataSource?: string | null;
   metadataEnrichedAt?: string | null;
+  noteCount?: number;
+}
+
+export interface DocumentFilterParams {
+  path?: string;
+  tag?: string;
+  status?: string;
+  minPages?: number | null;
+  maxPages?: number | null;
+  hasNotes?: boolean | null;
+  noteQuery?: string;
+  modifiedAfter?: string;
+  modifiedBefore?: string;
+  yearFrom?: number | null;
+  yearTo?: number | null;
+  hasMetadata?: boolean | null;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  size?: number;
+}
+
+export interface TagFacet {
+  id: number;
+  name: string;
+  colorHex: string;
+  documentCount: number;
+}
+
+export interface DocumentFacets {
+  totalDocuments: number;
+  unreadCount: number;
+  readingCount: number;
+  completedCount: number;
+  withNotesCount: number;
+  totalNotesCount: number;
+  withMetadataCount: number;
+  shortDocsCount: number;
+  mediumDocsCount: number;
+  longDocsCount: number;
+  minPageCount: number;
+  maxPageCount: number;
+  minPublicationYear: number | null;
+  maxPublicationYear: number | null;
+  tags: TagFacet[];
 }
 
 export interface PaginatedResponse<T> {
