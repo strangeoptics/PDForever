@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -28,6 +28,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   GripVertical,
+  ListTree,
+  Loader2,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -38,10 +40,16 @@ import {
   ReadingStatus,
   SearchResultGroup,
   Tag,
+  TocItem,
   TreeNode,
   UpdateReadingProgressPayload,
 } from './types';
-import { PdfViewer } from './components/PdfViewer';
+import {
+  PdfViewer,
+  TocTreeNode,
+  countTocItems,
+  findActiveTocPage,
+} from './components/PdfViewer';
 import { NoteModal } from './components/NoteModal';
 import { DocumentCover } from './components/DocumentCover';
 import { SettingsModal } from './components/SettingsModal';
@@ -116,7 +124,7 @@ export const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [coverCacheVersion, setCoverCacheVersion] = useState<number>(0);
-  const [sidebarTab, setSidebarTab] = useState<'folders' | 'tags' | 'notes'>('folders');
+  const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes'>('folders');
   const [sidebarWidth, setSidebarWidth] = useState<number>(loadInitialSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadInitialSidebarCollapsed);
   const [isResizingSidebar, setIsResizingSidebar] = useState<boolean>(false);
@@ -130,6 +138,10 @@ export const App: React.FC = () => {
   const [tags, setTags] = useState<Tag[]>([]);
   const [globalNotes, setGlobalNotes] = useState<ReadingNote[]>([]);
   const [docNotes, setDocNotes] = useState<ReadingNote[]>([]);
+  const [docOutline, setDocOutline] = useState<TocItem[]>([]);
+  const [outlineLoading, setOutlineLoading] = useState<boolean>(false);
+  const [tocFilter, setTocFilter] = useState<string>('');
+  const [activeViewerPage, setActiveViewerPage] = useState<number>(1);
 
   // Filter & Selection state
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>('');
@@ -283,17 +295,49 @@ export const App: React.FC = () => {
     loadLibraryData();
   }, [loadLibraryData]);
 
-  // Load notes when active document changes
+  // Load notes and TOC outline when active document changes
   useEffect(() => {
     if (!activeDoc) {
       setDocNotes([]);
+      setDocOutline([]);
+      setOutlineLoading(false);
+      setTocFilter('');
       return;
     }
+    let cancelled = false;
+    setOutlineLoading(true);
+    setTocFilter('');
+    setActiveViewerPage(activeDoc.lastReadPage || 1);
+
     api
       .getDocumentNotes(activeDoc.id)
-      .then(setDocNotes)
+      .then((notes) => {
+        if (!cancelled) setDocNotes(notes);
+      })
       .catch((err) => console.error('Failed to load document notes:', err));
+
+    api
+      .getDocumentOutline(activeDoc.id)
+      .then((items) => {
+        if (!cancelled) setDocOutline(items || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDocOutline([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOutlineLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeDoc?.id]);
+
+  const totalTocCount = useMemo(() => countTocItems(docOutline), [docOutline]);
+  const activeTocPage = useMemo(
+    () => findActiveTocPage(docOutline, activeViewerPage),
+    [docOutline, activeViewerPage]
+  );
 
   // Load notes when secondary document in Split-View changes
   useEffect(() => {
@@ -696,48 +740,65 @@ export const App: React.FC = () => {
 
       {/* 3-Panel Workspace */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left Sidebar: 3 Tabs (Directory Tree, Tag Browser, Global Reading Notes) */}
+        {/* Left Sidebar: 4 Tabs (Folders, Gliederung/TOC, Tags, Notes) */}
         {!sidebarCollapsed && (
           <aside
             style={{ width: `${sidebarWidth}px` }}
             className="shrink-0 flex flex-col bg-white dark:bg-slate-900/90 overflow-hidden"
           >
             {/* Sidebar Navigation Tabs */}
-          <div className="grid grid-cols-3 border-b border-slate-200 dark:border-slate-800 p-1 gap-1 bg-slate-100/60 dark:bg-slate-950/50">
-            <button
-              onClick={() => setSidebarTab('folders')}
-              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition ${
-                sidebarTab === 'folders'
-                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              <Folder className="w-3.5 h-3.5" />
-              Folders
-            </button>
-            <button
-              onClick={() => setSidebarTab('tags')}
-              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition ${
-                sidebarTab === 'tags'
-                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              <TagIcon className="w-3.5 h-3.5" />
-              Tags ({tags.length})
-            </button>
-            <button
-              onClick={() => setSidebarTab('notes')}
-              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition ${
-                sidebarTab === 'notes'
-                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              <BookMarked className="w-3.5 h-3.5" />
-              Notes ({globalNotes.length})
-            </button>
-          </div>
+            <div className="grid grid-cols-4 border-b border-slate-200 dark:border-slate-800 p-1 gap-1 bg-slate-100/60 dark:bg-slate-950/50">
+              <button
+                onClick={() => setSidebarTab('folders')}
+                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
+                  sidebarTab === 'folders'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Ordner & Dateien"
+              >
+                <Folder className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Folders</span>
+              </button>
+              <button
+                onClick={() => setSidebarTab('outline')}
+                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
+                  sidebarTab === 'outline'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Inhaltsverzeichnis / PDF-Bookmarks (Gliederung)"
+              >
+                <ListTree className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  Gliederung{totalTocCount > 0 ? ` (${totalTocCount})` : ''}
+                </span>
+              </button>
+              <button
+                onClick={() => setSidebarTab('tags')}
+                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
+                  sidebarTab === 'tags'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Tags"
+              >
+                <TagIcon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Tags ({tags.length})</span>
+              </button>
+              <button
+                onClick={() => setSidebarTab('notes')}
+                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
+                  sidebarTab === 'notes'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Lesezettel / Notizen"
+              >
+                <BookMarked className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Notes ({globalNotes.length})</span>
+              </button>
+            </div>
 
           {/* Tab 1: Directory Tree */}
           {sidebarTab === 'folders' && (
@@ -784,7 +845,87 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Tab 2: Tag Browser */}
+          {/* Tab 2: Document Outline / Table of Contents (Gliederung) */}
+          {sidebarTab === 'outline' && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {!activeDoc ? (
+                <div className="text-center py-12 px-4 space-y-2">
+                  <ListTree className="w-7 h-7 text-slate-400 mx-auto stroke-1" />
+                  <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Kein Dokument geöffnet
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Öffnen Sie ein PDF-Dokument, um dessen Inhaltsverzeichnis (PDF-Bookmarks) hier anzuzeigen.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between gap-2 px-1">
+                      <span
+                        className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate"
+                        title={activeDoc.fileName}
+                      >
+                        {activeDoc.fileName}
+                      </span>
+                      {totalTocCount > 0 && (
+                        <span className="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                          {totalTocCount}
+                        </span>
+                      )}
+                    </div>
+
+                    {totalTocCount > 4 && (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                        <input
+                          type="text"
+                          value={tocFilter}
+                          onChange={(e) => setTocFilter(e.target.value)}
+                          placeholder="Kapitel filtern…"
+                          className="w-full pl-8 pr-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                    {outlineLoading ? (
+                      <div className="flex items-center justify-center py-10 text-xs text-slate-400 gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                        Lese PDF-Gliederung…
+                      </div>
+                    ) : docOutline.length === 0 ? (
+                      <div className="text-center py-10 px-3 space-y-1.5">
+                        <ListTree className="w-6 h-6 text-slate-400 mx-auto stroke-1" />
+                        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                          Keine PDF-Bookmarks vorhanden
+                        </p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Dieses PDF enthält kein eingebettetes Inhaltsverzeichnis (PDDocumentOutline).
+                        </p>
+                      </div>
+                    ) : (
+                      docOutline.map((item, idx) => (
+                        <TocTreeNode
+                          key={`${item.title}-${idx}`}
+                          item={item}
+                          level={0}
+                          filterQuery={tocFilter}
+                          activeTocPage={activeTocPage}
+                          onSelectPage={(page) =>
+                            setTargetJump({ page, timestamp: Date.now() })
+                          }
+                        />
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Tab 3: Tag Browser */}
           {sidebarTab === 'tags' && (
             <div className="flex-1 flex flex-col overflow-hidden">
               <form
@@ -1009,6 +1150,7 @@ export const App: React.FC = () => {
                     onToggleInspector={() => setInspectorOpen((o) => !o)}
                     onToggleSplitView={handleToggleSplitView}
                     onUpdateProgress={handleUpdateReadingProgress}
+                    onPageChange={setActiveViewerPage}
                     onRequestCreateNote={(sel) => {
                       setEditingNote(null);
                       setPendingSelection(sel);
