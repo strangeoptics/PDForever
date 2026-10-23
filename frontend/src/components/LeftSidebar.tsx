@@ -31,7 +31,7 @@ import {
   TocTreeNode,
   countTocItems,
   findActiveTocPage,
-} from './PdfViewer';
+} from './TocTreeNode';
 import { RagChatTab } from './RagChatTab';
 
 const TAG_COLORS = [

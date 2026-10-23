@@ -1,25 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import {
-  ZoomIn,
-  ZoomOut,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  BookOpen,
-  ScrollText,
-  BookmarkPlus,
-  Loader2,
-  PanelRightOpen,
-  PanelRightClose,
-  Columns2,
-  BookOpenCheck,
-  CheckCircle2,
-  Clock,
-  CircleDashed,
-  X,
-  FileText,
-} from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import {
   BoundingBox,
   DocumentItem,
@@ -30,6 +11,15 @@ import {
   UpdateReadingProgressPayload,
 } from '../types';
 import { api } from '../api';
+import { TocTreeNode, countTocItems, findActiveTocPage } from './TocTreeNode';
+import { PdfPageSurface } from './PdfPageSurface';
+import { PdfViewerToolbar } from './PdfViewerToolbar';
+import {
+  FloatingSelectionButton,
+  FloatingSelectionData,
+} from './FloatingSelectionButton';
+
+export { TocTreeNode, countTocItems, findActiveTocPage };
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -58,36 +48,6 @@ interface PdfViewerProps {
     boundingBox: BoundingBox;
   }) => void;
   onSelectNote: (note: ReadingNote) => void;
-}
-
-interface FloatingSelectionMenu {
-  pageNumber: number;
-  selectedText: string;
-  boundingBox: BoundingBox;
-  screenX: number;
-  screenY: number;
-}
-
-export function countTocItems(items: TocItem[]): number {
-  return items.reduce((acc, item) => acc + 1 + countTocItems(item.children || []), 0);
-}
-
-export function findActiveTocPage(items: TocItem[], currentPage: number): number | null {
-  let bestPage: number | null = null;
-  const traverse = (nodes: TocItem[]) => {
-    for (const node of nodes) {
-      if (node.pageNumber !== null && node.pageNumber <= currentPage) {
-        if (bestPage === null || node.pageNumber >= bestPage) {
-          bestPage = node.pageNumber;
-        }
-      }
-      if (node.children?.length) {
-        traverse(node.children);
-      }
-    }
-  };
-  traverse(items);
-  return bestPage;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
@@ -127,7 +87,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [viewMode, setViewMode] = useState<ReaderViewMode>(defaultViewMode);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [floatingMenu, setFloatingMenu] = useState<FloatingSelectionMenu | null>(null);
+  const [floatingMenu, setFloatingMenu] = useState<FloatingSelectionData | null>(null);
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -508,279 +468,48 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-slate-100 dark:bg-slate-950 select-text relative">
-      {/* Reader Toolbar */}
-      <div className="flex flex-col bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-xs z-20">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-          {/* Left Group: Document Title / Switcher & Reading Status */}
-          <div className="flex items-center gap-2 min-w-0">
-            {/* Secondary Split-Pane Document Selector OR Primary Title */}
-            {isSecondaryPane && onChangeSecondaryDocument && availableDocuments.length > 0 ? (
-              <div className="flex items-center gap-1.5 min-w-0">
-                <FileText className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                <select
-                  value={docItem.id}
-                  onChange={(e) => onChangeSecondaryDocument(e.target.value)}
-                  className="max-w-[200px] sm:max-w-xs truncate rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  title="Dokument im Split-View wechseln"
-                >
-                  {availableDocuments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.fileName} ({d.pageCount} S.)
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <span
-                className="font-medium text-sm text-slate-800 dark:text-slate-100 truncate max-w-[160px] sm:max-w-xs"
-                title={docItem.relativePath}
-              >
-                {docItem.fileName}
-              </span>
-            )}
+      <PdfViewerToolbar
+        docItem={docItem}
+        isSecondaryPane={isSecondaryPane}
+        availableDocuments={availableDocuments}
+        onChangeSecondaryDocument={onChangeSecondaryDocument}
+        currentStatus={currentStatus}
+        readingPercent={readingPercent}
+        onCycleReadingStatus={onUpdateProgress ? cycleReadingStatus : undefined}
+        currentPage={currentPage}
+        pageInput={pageInput}
+        onPageInputChange={setPageInput}
+        onGoToPage={goToPage}
+        onPrevPage={handlePrevPage}
+        onNextPage={handleNextPage}
+        pagesToRender={pagesToRender}
+        numPages={numPages}
+        zoomLevel={zoomLevel}
+        onZoomIn={() => updateDocZoom((z) => z + 0.15)}
+        onZoomOut={() => updateDocZoom((z) => z - 0.15)}
+        onResetZoom={() => updateDocZoom(() => 1.0)}
+        viewMode={viewMode}
+        onSetViewMode={setViewMode}
+        isSplitView={isSplitView}
+        onToggleSplitView={onToggleSplitView}
+        onCloseSecondaryPane={onCloseSecondaryPane}
+        inspectorOpen={inspectorOpen}
+        onToggleInspector={onToggleInspector}
+      />
 
-            {/* Reading Status Badge (Click to cycle: Ungelesen -> Am Lesen -> Gelesen) */}
-            {onUpdateProgress && (
-              <button
-                onClick={cycleReadingStatus}
-                className={`hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border transition ${
-                  currentStatus === 'COMPLETED'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                    : currentStatus === 'READING'
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
-                    : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400'
-                }`}
-                title="Lesestatus ändern (Klicken zum Wechseln: Ungelesen → Am Lesen → Gelesen)"
-              >
-                {currentStatus === 'COMPLETED' ? (
-                  <>
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Gelesen</span>
-                  </>
-                ) : currentStatus === 'READING' ? (
-                  <>
-                    <Clock className="w-3 h-3" />
-                    <span>Am Lesen ({readingPercent}%)</span>
-                  </>
-                ) : (
-                  <>
-                    <CircleDashed className="w-3 h-3" />
-                    <span>Ungelesen</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* Right Group: Page Navigation, Zoom, View Modes (Continuous, Single, Spread, Book), Split-View */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <button
-              onClick={handlePrevPage}
-              disabled={currentPage <= 1}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
-              title="Vorherige Seite"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const parsed = parseInt(pageInput, 10);
-                if (!Number.isNaN(parsed)) goToPage(parsed);
-              }}
-              className="flex items-center gap-1 text-xs"
-            >
-              <input
-                type="text"
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value)}
-                className="w-11 text-center rounded border border-slate-300 dark:border-slate-700 bg-transparent py-1 text-xs font-medium"
-              />
-              <span className="text-slate-500 dark:text-slate-400 font-mono">
-                {pagesToRender.length === 2
-                  ? `–${pagesToRender[1]} / ${numPages}`
-                  : `/ ${numPages}`}
-              </span>
-            </form>
-
-            <button
-              onClick={handleNextPage}
-              disabled={pagesToRender[pagesToRender.length - 1] >= numPages}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
-              title="Nächste Seite"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-0.5" />
-
-            <button
-              onClick={() => updateDocZoom((z) => z - 0.15)}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Verkleinern"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => updateDocZoom(() => 1.0)}
-              className="text-xs font-mono w-11 text-center py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Zoom auf 100% zurücksetzen"
-            >
-              {Math.round(zoomLevel * 100)}%
-            </button>
-            <button
-              onClick={() => updateDocZoom((z) => z + 0.15)}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Vergrößern"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-
-            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-0.5" />
-
-            {/* View Mode Selector: Continuous | Single | Spread (2-Page) | Book (Cover + 2-Page) */}
-            <div className="inline-flex items-center rounded-lg p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200/70 dark:border-slate-700/70">
-              <button
-                type="button"
-                onClick={() => setViewMode('continuous')}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition ${
-                  viewMode === 'continuous'
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Fortlaufend scrollen"
-              >
-                <ScrollText className="w-3.5 h-3.5" />
-                <span className="hidden 2xl:inline">Fortlaufend</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('single')}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition ${
-                  viewMode === 'single'
-                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Einzelseiten-Ansicht"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span className="hidden 2xl:inline">Einzeln</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('spread')}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition ${
-                  viewMode === 'spread'
-                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Doppelseiten-Modus (Seite 1–2, 3–4, …)"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span className="hidden 2xl:inline">Doppelseite</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('book')}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition ${
-                  viewMode === 'book'
-                    ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Buchmodus (Deckblatt einzeln, danach Doppelseiten 2–3, 4–5, …)"
-              >
-                <BookOpenCheck className="w-3.5 h-3.5" />
-                <span className="hidden 2xl:inline">Buch</span>
-              </button>
-            </div>
-
-            {/* Split-View Toggle (Primary Pane) or Close Button (Secondary Pane) */}
-            {!isSecondaryPane && onToggleSplitView && (
-              <button
-                onClick={onToggleSplitView}
-                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-                  isSplitView
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
-                }`}
-                title="Split-View (Vergleichsmodus mit 2 Dokumenten oder 2 Ansichten nebeneinander)"
-              >
-                <Columns2 className="w-3.5 h-3.5" />
-                <span className="hidden lg:inline">Split-View</span>
-              </button>
-            )}
-
-            {isSecondaryPane && onCloseSecondaryPane && (
-              <button
-                onClick={onCloseSecondaryPane}
-                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition"
-                title="Split-View schließen"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-
-            {!isSecondaryPane && onToggleInspector && (
-              <button
-                onClick={onToggleInspector}
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
-                title="Notizen & Tags Inspector ein-/ausblenden"
-              >
-                {inspectorOpen ? (
-                  <PanelRightClose className="w-4 h-4" />
-                ) : (
-                  <PanelRightOpen className="w-4 h-4" />
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Subtle Reading Progress Bar along bottom of Toolbar */}
-        <div className="h-0.5 w-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-          <div
-            className={`h-full transition-all duration-300 ${
-              currentStatus === 'COMPLETED'
-                ? 'bg-emerald-500'
-                : 'bg-gradient-to-r from-blue-500 to-indigo-500'
-            }`}
-            style={{ width: `${readingPercent}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Floating Selection Context Menu: Add Reading Note */}
-      {floatingMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            left: `${floatingMenu.screenX}px`,
-            top: `${floatingMenu.screenY}px`,
-            transform: 'translate(-50%, -100%)',
-          }}
-          className="z-50 animate-in fade-in zoom-in-95 duration-100"
-        >
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRequestCreateNote({
-                documentId: docItem.id,
-                pageNumber: floatingMenu.pageNumber,
-                selectedText: floatingMenu.selectedText,
-                boundingBox: floatingMenu.boundingBox,
-              });
-              window.getSelection()?.removeAllRanges();
-              setFloatingMenu(null);
-            }}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 font-semibold text-xs shadow-xl ring-2 ring-white/20 hover:scale-105 transition"
-          >
-            <BookmarkPlus className="w-4 h-4" />
-            Add Reading Note
-          </button>
-        </div>
-      )}
+      {/* Floating Selection Menu: Add Reading Note from selected text */}
+      <FloatingSelectionButton
+        data={floatingMenu}
+        onAddNote={(noteData) => {
+          onRequestCreateNote({
+            documentId: docItem.id,
+            pageNumber: noteData.pageNumber,
+            selectedText: noteData.selectedText,
+            boundingBox: noteData.boundingBox,
+          });
+        }}
+        onClear={() => setFloatingMenu(null)}
+      />
 
       {/* Body Area: Scrollable PDF Viewport */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -865,296 +594,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               })
             ))}
         </div>
-      </div>
-    </div>
-  );
-};
-
-interface TocTreeNodeProps {
-  item: TocItem;
-  level: number;
-  filterQuery: string;
-  activeTocPage: number | null;
-  onSelectPage: (page: number) => void;
-}
-
-export const TocTreeNode: React.FC<TocTreeNodeProps> = ({
-  item,
-  level,
-  filterQuery,
-  activeTocPage,
-  onSelectPage,
-}) => {
-  const [expanded, setExpanded] = useState<boolean>(level < 2);
-  const hasChildren = Boolean(item.children && item.children.length > 0);
-
-  const matchesFilter = useMemo(() => {
-    const q = filterQuery.trim().toLowerCase();
-    if (!q) return true;
-    const check = (node: TocItem): boolean => {
-      if (node.title.toLowerCase().includes(q)) return true;
-      return (node.children || []).some(check);
-    };
-    return check(item);
-  }, [item, filterQuery]);
-
-  if (!matchesFilter) return null;
-
-  const isActive = item.pageNumber !== null && item.pageNumber === activeTocPage;
-  const isExpanded = filterQuery.trim() ? true : expanded;
-
-  return (
-    <div>
-      <div
-        style={{ paddingLeft: `${level * 12 + 6}px` }}
-        className={`flex items-center justify-between gap-1.5 pr-2 py-1.5 rounded-lg text-xs transition ${
-          isActive
-            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
-            : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-700 dark:text-slate-300'
-        }`}
-      >
-        <div className="flex items-center gap-1 flex-1 min-w-0">
-          {hasChildren ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded((prev) => !prev);
-              }}
-              className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 shrink-0"
-            >
-              {isExpanded ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5" />
-              )}
-            </button>
-          ) : (
-            <span className="w-4 shrink-0" />
-          )}
-
-          <button
-            type="button"
-            onClick={() => item.pageNumber && onSelectPage(item.pageNumber)}
-            disabled={!item.pageNumber}
-            className="flex-1 text-left truncate disabled:opacity-60"
-            title={item.title}
-          >
-            {item.title}
-          </button>
-        </div>
-
-        {item.pageNumber !== null && (
-          <button
-            type="button"
-            onClick={() => onSelectPage(item.pageNumber!)}
-            className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-blue-500"
-          >
-            {item.pageNumber}
-          </button>
-        )}
-      </div>
-
-      {hasChildren && isExpanded && (
-        <div className="space-y-0.5 mt-0.5">
-          {item.children.map((child, idx) => (
-            <TocTreeNode
-              key={`${child.title}-${idx}`}
-              item={child}
-              level={level + 1}
-              filterQuery={filterQuery}
-              activeTocPage={activeTocPage}
-              onSelectPage={onSelectPage}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface PdfPageSurfaceProps {
-  pdfDoc: pdfjsLib.PDFDocumentProxy;
-  pageNumber: number;
-  scale: number;
-  defaultPageSize: { width: number; height: number };
-  pageNotes: ReadingNote[];
-  highlightedNoteId: string | null;
-  forceVisible?: boolean;
-  onSelectNote: (note: ReadingNote) => void;
-  registerPageEl: (el: HTMLDivElement | null) => void;
-}
-
-const PdfPageSurface: React.FC<PdfPageSurfaceProps> = ({
-  pdfDoc,
-  pageNumber,
-  scale,
-  defaultPageSize,
-  pageNotes,
-  highlightedNoteId,
-  forceVisible = false,
-  onSelectNote,
-  registerPageEl,
-}) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textLayerRef = useRef<HTMLDivElement | null>(null);
-  const [isVisible, setIsVisible] = useState<boolean>(forceVisible || pageNumber <= 3);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
-    width: Math.floor(defaultPageSize.width * scale),
-    height: Math.floor(defaultPageSize.height * scale),
-  });
-
-  useEffect(() => {
-    if (forceVisible) {
-      setIsVisible(true);
-    }
-  }, [forceVisible]);
-
-  useEffect(() => {
-    if (!isVisible) {
-      setDimensions({
-        width: Math.floor(defaultPageSize.width * scale),
-        height: Math.floor(defaultPageSize.height * scale),
-      });
-    }
-  }, [defaultPageSize, scale, isVisible]);
-
-  // Lazy-render pages via IntersectionObserver so 500+ page books stay fast & low-memory
-  useEffect(() => {
-    if (forceVisible) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setIsVisible(true);
-          }
-        }
-      },
-      { rootMargin: '600px 0px' }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [forceVisible]);
-
-  useEffect(() => {
-    if (!isVisible) return;
-    let cancelled = false;
-    let renderTask: pdfjsLib.RenderTask | null = null;
-    let textLayerInstance: pdfjsLib.TextLayer | null = null;
-
-    pdfDoc
-      .getPage(pageNumber)
-      .then(async (page) => {
-        if (cancelled) return;
-        const viewport = page.getViewport({ scale });
-        setDimensions({
-          width: Math.floor(viewport.width),
-          height: Math.floor(viewport.height),
-        });
-
-        const canvas = canvasRef.current;
-        const textLayerDiv = textLayerRef.current;
-        if (!canvas || !textLayerDiv) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        renderTask = page.render({
-          canvasContext: ctx,
-          viewport,
-        });
-        await renderTask.promise;
-
-        if (cancelled) return;
-
-        // Render selectable PDF.js TextLayer
-        textLayerDiv.innerHTML = '';
-        textLayerDiv.style.setProperty('--scale-factor', String(viewport.scale));
-        textLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
-        textLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
-
-        const textContent = await page.getTextContent();
-        if (cancelled) return;
-
-        textLayerInstance = new pdfjsLib.TextLayer({
-          textContentSource: textContent,
-          container: textLayerDiv,
-          viewport,
-        });
-        await textLayerInstance.render();
-      })
-      .catch(() => {
-        // Ignore cancelled render task errors
-      });
-
-    return () => {
-      cancelled = true;
-      if (renderTask) {
-        renderTask.cancel();
-      }
-      if (textLayerInstance) {
-        textLayerInstance.cancel();
-      }
-    };
-  }, [pdfDoc, pageNumber, scale, isVisible]);
-
-  return (
-    <div
-      ref={(el) => {
-        containerRef.current = el;
-        registerPageEl(el);
-      }}
-      data-page-number={pageNumber}
-      style={{ width: `${dimensions.width}px`, height: `${dimensions.height}px` }}
-      className="pdf-page-container relative bg-white shadow-lg ring-1 ring-slate-300 dark:ring-slate-800 rounded-xs shrink-0"
-    >
-      <canvas ref={canvasRef} className="block pointer-events-none" />
-
-      {/* Visual Highlight Overlays for ReadingNotes (Normalized 0.0 - 1.0 coordinates) */}
-      <div className="absolute inset-0 pointer-events-none z-20">
-        {pageNotes.map((note) => {
-          const { x1, y1, x2, y2 } = note.boundingBox;
-          const left = `${Math.max(0, Math.min(98, x1 * 100))}%`;
-          const top = `${Math.max(0, Math.min(98, y1 * 100))}%`;
-          const width = `${Math.max(3, Math.min(100 - x1 * 100, (x2 - x1) * 100))}%`;
-          const height = `${Math.max(1.8, Math.min(100 - y1 * 100, (y2 - y1) * 100))}%`;
-          const isPulse = highlightedNoteId === note.id;
-
-          return (
-            <div
-              key={note.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectNote(note);
-              }}
-              style={{ left, top, width, height }}
-              title={`${note.noteMarkdown}\n(Click to view note)`}
-              className={`pointer-events-auto absolute cursor-pointer rounded-xs transition-all duration-300 ${
-                isPulse
-                  ? 'bg-amber-400/60 ring-4 ring-amber-500 shadow-lg scale-[1.02]'
-                  : 'bg-amber-300/35 hover:bg-amber-400/50 border-b-2 border-amber-500/80'
-              }`}
-            />
-          );
-        })}
-      </div>
-
-      {/* Selectable PDF.js TextLayer */}
-      <div ref={textLayerRef} className="textLayer" />
-
-      {/* Subtle Page Number Footer Badge */}
-      <div className="absolute bottom-2 right-3 z-30 pointer-events-none px-2 py-0.5 rounded bg-slate-900/65 text-[11px] font-mono text-white">
-        p. {pageNumber}
       </div>
     </div>
   );
