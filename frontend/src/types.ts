@@ -79,3 +79,11 @@ export interface SearchResultGroup {
   matches: SearchPageMatch[];
 }
 
+export interface AppSettings {
+  showCovers: boolean;
+  coverLayout: 'left' | 'top';
+  defaultViewMode: 'continuous' | 'single';
+  defaultInspectorOpen: boolean;
+}
+
+

@@ -8,6 +8,8 @@ storage/
 *.db-wal
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+src/main/resources/static/
 .idea/
 .vscode/
 *.iml

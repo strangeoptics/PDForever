@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api")
@@ -61,6 +63,25 @@ public class DocumentController {
     @GetMapping("/documents/{id}")
     public DocumentDto getDocument(@PathVariable UUID id) {
         return libraryService.getDocument(id);
+    }
+
+    /**
+     * Renders (or serves from disk cache) a JPEG cover image of page 1 of the PDF document.
+     */
+    @GetMapping(value = "/documents/{id}/cover", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<Resource> getDocumentCover(@PathVariable UUID id) {
+        Path coverPath = libraryService.getOrCreateDocumentCover(id);
+        Resource resource = new FileSystemResource(coverPath);
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG)
+                .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS).cachePublic())
+                .body(resource);
+    }
+
+    @DeleteMapping("/covers")
+    public Map<String, Integer> clearCoverCache() {
+        int deleted = libraryService.clearCoverCache();
+        return Map.of("deleted", deleted);
     }
 
     /**

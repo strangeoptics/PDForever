@@ -53,6 +53,10 @@ public class DirectoryScannerService {
         return properties.rootDir().toAbsolutePath().normalize();
     }
 
+    public Path getCoversPath() {
+        return properties.coversDir().toAbsolutePath().normalize();
+    }
+
     public String toRelativePath(Path file) {
         Path root = getRootPath();
         Path normalizedFile = file.toAbsolutePath().normalize();
@@ -159,6 +163,7 @@ public class DirectoryScannerService {
                 existing.setDeleted(false);
                 Document saved = documentRepository.save(existing);
 
+                deleteCachedCover(saved.getId());
                 luceneIndexService.indexDocumentPages(saved, extracted.pageTexts());
                 log.info("Re-indexed modified PDF: {} ({} pages)", relPath, extracted.pageCount());
                 return IngestionOutcome.UPDATED;
@@ -202,11 +207,21 @@ public class DirectoryScannerService {
     private void markDocumentDeleted(Document doc) {
         doc.setDeleted(true);
         documentRepository.save(doc);
+        deleteCachedCover(doc.getId());
         try {
             luceneIndexService.deleteDocument(doc.getId());
             log.info("Marked document as deleted and purged from Lucene: {}", doc.getRelativePath());
         } catch (IOException e) {
             log.error("Failed to purge document {} from Lucene: {}", doc.getId(), e.getMessage());
+        }
+    }
+
+    private void deleteCachedCover(UUID docId) {
+        if (docId == null) return;
+        try {
+            Files.deleteIfExists(getCoversPath().resolve(docId + ".jpg"));
+        } catch (IOException e) {
+            log.debug("Failed to delete cached cover for {}: {}", docId, e.getMessage());
         }
     }
 

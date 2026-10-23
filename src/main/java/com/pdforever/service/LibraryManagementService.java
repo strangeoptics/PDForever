@@ -16,11 +16,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 @Service
 public class LibraryManagementService {
@@ -29,6 +31,7 @@ public class LibraryManagementService {
     private final TagRepository tagRepository;
     private final ReadingNoteRepository noteRepository;
     private final DirectoryScannerService scannerService;
+    private final PdfExtractionService pdfExtractionService;
     private final ObjectMapper objectMapper;
 
     public LibraryManagementService(
@@ -36,12 +39,14 @@ public class LibraryManagementService {
             TagRepository tagRepository,
             ReadingNoteRepository noteRepository,
             DirectoryScannerService scannerService,
+            PdfExtractionService pdfExtractionService,
             ObjectMapper objectMapper
     ) {
         this.documentRepository = documentRepository;
         this.tagRepository = tagRepository;
         this.noteRepository = noteRepository;
         this.scannerService = scannerService;
+        this.pdfExtractionService = pdfExtractionService;
         this.objectMapper = objectMapper;
     }
 
@@ -78,6 +83,52 @@ public class LibraryManagementService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF file not found on disk: " + doc.getRelativePath());
         }
         return fullPath;
+    }
+
+    @Transactional(readOnly = true)
+    public Path getOrCreateDocumentCover(UUID id) {
+        Path pdfPath = getDocumentFilePath(id);
+        Path coversDir = scannerService.getCoversPath();
+        Path coverPath = coversDir.resolve(id + ".jpg").normalize();
+        if (!coverPath.startsWith(coversDir)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid document id");
+        }
+
+        try {
+            if (Files.exists(coverPath) && Files.size(coverPath) > 0) {
+                long coverMtime = Files.getLastModifiedTime(coverPath).toMillis();
+                long pdfMtime = Files.getLastModifiedTime(pdfPath).toMillis();
+                if (coverMtime >= pdfMtime) {
+                    return coverPath;
+                }
+            }
+        } catch (IOException ignored) {
+        }
+
+        boolean rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
+        if (!rendered || !Files.exists(coverPath)) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not render cover image for document: " + id);
+        }
+        return coverPath;
+    }
+
+    public int clearCoverCache() {
+        Path coversDir = scannerService.getCoversPath();
+        if (!Files.exists(coversDir) || !Files.isDirectory(coversDir)) {
+            return 0;
+        }
+        int deleted = 0;
+        try (Stream<Path> files = Files.list(coversDir)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                if (file.getFileName().toString().toLowerCase().endsWith(".jpg")) {
+                    if (Files.deleteIfExists(file)) {
+                        deleted++;
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return deleted;
     }
 
     @Transactional(readOnly = true)

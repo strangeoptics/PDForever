@@ -45,10 +45,12 @@ class IngestionAndSearchIntegrationTest {
     static void registerProperties(DynamicPropertyRegistry registry) {
         Path rootDir = tempDir.resolve("storage");
         Path luceneDir = tempDir.resolve("lucene");
+        Path coversDir = tempDir.resolve("covers");
         Path dbFile = tempDir.resolve("test-pdforever.db");
 
         registry.add("library.root-dir", rootDir::toString);
         registry.add("library.lucene-dir", luceneDir::toString);
+        registry.add("library.covers-dir", coversDir::toString);
         registry.add("library.watcher-enabled", () -> "false");
         registry.add("library.debounce-ms", () -> "100");
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + dbFile.toAbsolutePath() + "?journal_mode=WAL&foreign_keys=on");
@@ -126,6 +128,11 @@ class IngestionAndSearchIntegrationTest {
                 .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
                 .andExpect(header().exists(HttpHeaders.CONTENT_RANGE))
                 .andExpect(header().longValue(HttpHeaders.CONTENT_LENGTH, 128L));
+
+        // 4b. Test PDF Cover Thumbnail Generation & Caching
+        mockMvc.perform(get("/api/documents/{id}/cover", savedDoc.getId()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/jpeg"));
 
         // 5. Test Tags & ReadingNotes (Lesezettel) with normalized bounding boxes
         TagDto tag = libraryService.createTag(new CreateTagRequest("Quantum", "#8b5cf6"));

@@ -45,6 +45,17 @@ export const api = {
     return `${API_BASE}/documents/${id}/stream`;
   },
 
+  getCoverUrl(id: string, lastModified?: string): string {
+    const qs = lastModified ? `?v=${encodeURIComponent(lastModified)}` : '';
+    return `${API_BASE}/documents/${id}/cover${qs}`;
+  },
+
+  clearCoverCache(): Promise<{ deleted: number }> {
+    return fetch(`${API_BASE}/covers`, { method: 'DELETE' }).then(
+      handleJson<{ deleted: number }>
+    );
+  },
+
   searchLucene(query: string): Promise<SearchResultGroup[]> {
     const sp = new URLSearchParams({ q: query });
     return fetch(`${API_BASE}/search?${sp.toString()}`).then(handleJson<SearchResultGroup[]>);

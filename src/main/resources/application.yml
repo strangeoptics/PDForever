@@ -25,6 +25,7 @@ server:
 library:
   root-dir: ./storage
   lucene-dir: ./data/lucene-index
+  covers-dir: ./data/covers
   debounce-ms: 2000
   watcher-enabled: true
   clean-remove-literals:

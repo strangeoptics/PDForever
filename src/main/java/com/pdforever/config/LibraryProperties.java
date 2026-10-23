@@ -9,6 +9,7 @@ import java.util.List;
 public record LibraryProperties(
         Path rootDir,
         Path luceneDir,
+        Path coversDir,
         long debounceMs,
         boolean watcherEnabled,
         List<String> cleanRemoveLiterals,
@@ -20,6 +21,9 @@ public record LibraryProperties(
         }
         if (luceneDir == null) {
             luceneDir = Path.of("./data/lucene-index");
+        }
+        if (coversDir == null) {
+            coversDir = Path.of("./data/covers");
         }
         if (debounceMs <= 0) {
             debounceMs = 2000L;

@@ -25,6 +25,7 @@ interface PdfViewerProps {
   notes: ReadingNote[];
   targetJump: { page: number; noteId?: string; timestamp: number } | null;
   inspectorOpen: boolean;
+  defaultViewMode?: 'continuous' | 'single';
   onToggleInspector: () => void;
   onRequestCreateNote: (selection: {
     pageNumber: number;
@@ -47,6 +48,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   notes,
   targetJump,
   inspectorOpen,
+  defaultViewMode = 'continuous',
   onToggleInspector,
   onRequestCreateNote,
   onSelectNote,
@@ -63,8 +65,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Zoom factor relative to the document's normalized baseScale (1.0 = 100% fit width)
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
   const zoomByDocRef = useRef<Map<string, number>>(new Map());
-  const [viewMode, setViewMode] = useState<'continuous' | 'single'>('continuous');
+  const [viewMode, setViewMode] = useState<'continuous' | 'single'>(defaultViewMode);
   const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    setViewMode(defaultViewMode);
+  }, [defaultViewMode]);
   const [error, setError] = useState<string | null>(null);
   const [floatingMenu, setFloatingMenu] = useState<FloatingSelectionMenu | null>(null);
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
