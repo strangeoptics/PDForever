@@ -1,40 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  Folder,
-  FolderOpen,
   FileText,
-  Tag as TagIcon,
-  BookMarked,
-  Search,
   RefreshCw,
   Sun,
   Moon,
-  Plus,
-  Trash2,
-  Edit3,
-  ChevronRight,
-  ChevronDown,
   Library,
-  Sparkles,
-  X,
-  ExternalLink,
   Layers,
   Settings,
-  CheckCircle2,
-  Clock,
-  CircleDashed,
-  Columns2,
-  Play,
   PanelLeftClose,
   PanelLeftOpen,
-  GripVertical,
-  ListTree,
-  Loader2,
-  SlidersHorizontal,
-  Calendar,
-  ArrowUpDown,
-  Bot,
-  MessageSquare,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -45,33 +19,25 @@ import {
   DocumentItem,
   ReadingNote,
   ReadingStatus,
-  SearchResultGroup,
   Tag,
   TocItem,
   TreeNode,
   UpdateMetadataPayload,
   UpdateReadingProgressPayload,
 } from './types';
-import {
-  PdfViewer,
-  TocTreeNode,
-  countTocItems,
-  findActiveTocPage,
-} from './components/PdfViewer';
+import { LeftSidebar } from './components/LeftSidebar';
+import { useSidebarResize } from './hooks/useSidebarResize';
+import { useDocumentFilters } from './hooks/useDocumentFilters';
 import { NoteModal } from './components/NoteModal';
-import { DocumentCover } from './components/DocumentCover';
 import { DocumentCard } from './components/DocumentCard';
-import { RightInspector } from './components/RightInspector';
-import { RagChatTab } from './components/RagChatTab';
+import { FacetedFilterBar } from './components/FacetedFilterBar';
+import { InstantSearchBar } from './components/InstantSearchBar';
 import { SettingsModal } from './components/SettingsModal';
+import { ContinueReadingShelf } from './components/ContinueReadingShelf';
+import { ReaderWorkspace } from './components/ReaderWorkspace';
 
 const SETTINGS_STORAGE_KEY = 'pdforever.settings';
 const DARK_MODE_STORAGE_KEY = 'pdforever.darkMode';
-const SIDEBAR_WIDTH_STORAGE_KEY = 'pdforever.sidebarWidth';
-const SIDEBAR_COLLAPSED_STORAGE_KEY = 'pdforever.sidebarCollapsed';
-const MIN_SIDEBAR_WIDTH = 200;
-const MAX_SIDEBAR_WIDTH = 640;
-const DEFAULT_SIDEBAR_WIDTH = 320;
 
 const DEFAULT_SETTINGS: AppSettings = {
   showCovers: true,
@@ -99,46 +65,20 @@ function loadInitialDarkMode(): boolean {
   }
 }
 
-function loadInitialSidebarWidth(): number {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-    if (!raw) return DEFAULT_SIDEBAR_WIDTH;
-    const parsed = Number(raw);
-    if (Number.isNaN(parsed)) return DEFAULT_SIDEBAR_WIDTH;
-    return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, parsed));
-  } catch {
-    return DEFAULT_SIDEBAR_WIDTH;
-  }
-}
-
-function loadInitialSidebarCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
-    return raw !== null ? Boolean(JSON.parse(raw)) : false;
-  } catch {
-    return false;
-  }
-}
-
-const TAG_COLORS = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4',
-];
-
 export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialDarkMode);
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [coverCacheVersion, setCoverCacheVersion] = useState<number>(0);
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes' | 'rag'>('folders');
-  const [sidebarWidth, setSidebarWidth] = useState<number>(loadInitialSidebarWidth);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(loadInitialSidebarCollapsed);
-  const [isResizingSidebar, setIsResizingSidebar] = useState<boolean>(false);
+  const {
+    sidebarWidth,
+    sidebarCollapsed,
+    isResizingSidebar,
+    toggleCollapsed,
+    startResizing,
+    resetSidebarWidth,
+  } = useSidebarResize();
 
   // Data state
   const [tree, setTree] = useState<TreeNode | null>(null);
@@ -154,25 +94,47 @@ export const App: React.FC = () => {
   const [tocFilter, setTocFilter] = useState<string>('');
   const [activeViewerPage, setActiveViewerPage] = useState<number>(1);
 
-  // Filter & Selection state
-  const [selectedFolderPath, setSelectedFolderPath] = useState<string>('');
-  const [selectedTagName, setSelectedTagName] = useState<string>('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('');
+  // Document Filters & Facets Hook
+  const {
+    selectedFolderPath,
+    setSelectedFolderPath,
+    selectedTagName,
+    setSelectedTagName,
+    selectedStatusFilter,
+    setSelectedStatusFilter,
+    facetsPanelOpen,
+    setFacetsPanelOpen,
+    minPagesFilter,
+    setMinPagesFilter,
+    maxPagesFilter,
+    setMaxPagesFilter,
+    hasNotesFilter,
+    setHasNotesFilter,
+    noteTopicFilter,
+    setNoteTopicFilter,
+    datePresetFilter,
+    setDatePresetFilter,
+    customDateAfter,
+    setCustomDateAfter,
+    customDateBefore,
+    setCustomDateBefore,
+    yearFromFilter,
+    setYearFromFilter,
+    yearToFilter,
+    setYearToFilter,
+    hasMetadataFilter,
+    setHasMetadataFilter,
+    sortBy,
+    setSortBy,
+    sortDir,
+    setSortDir,
+    currentFilterParams,
+    activeFacetCount,
+    resetAllFilters,
+    handleToggleTagFacet,
+  } = useDocumentFilters();
   const [facets, setFacets] = useState<DocumentFacets | null>(null);
-  const [facetsPanelOpen, setFacetsPanelOpen] = useState<boolean>(false);
-  const [minPagesFilter, setMinPagesFilter] = useState<string>('');
-  const [maxPagesFilter, setMaxPagesFilter] = useState<string>('');
-  const [hasNotesFilter, setHasNotesFilter] = useState<boolean | null>(null);
-  const [noteTopicFilter, setNoteTopicFilter] = useState<string>('');
-  const [datePresetFilter, setDatePresetFilter] = useState<'' | '7d' | '30d' | '365d' | 'custom'>('');
-  const [customDateAfter, setCustomDateAfter] = useState<string>('');
-  const [customDateBefore, setCustomDateBefore] = useState<string>('');
-  const [yearFromFilter, setYearFromFilter] = useState<string>('');
-  const [yearToFilter, setYearToFilter] = useState<string>('');
-  const [hasMetadataFilter, setHasMetadataFilter] = useState<boolean | null>(null);
-  const [sortBy, setSortBy] = useState<string>('fileName');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [applyFacetsToSearch, setApplyFacetsToSearch] = useState<boolean>(true);
+
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
   const [targetJump, setTargetJump] = useState<{
     page: number;
@@ -191,19 +153,8 @@ export const App: React.FC = () => {
     timestamp: number;
   } | null>(null);
 
-  // Instant Lucene Search state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchResults, setSearchResults] = useState<SearchResultGroup[]>([]);
-  const [searchOpen, setSearchOpen] = useState<boolean>(false);
-  const [searching, setSearching] = useState<boolean>(false);
-  const searchBoxRef = useRef<HTMLDivElement | null>(null);
-
   // Global Notes Search state
   const [noteSearchQuery, setNoteSearchQuery] = useState<string>('');
-
-  // New Tag Form state
-  const [newTagName, setNewTagName] = useState<string>('');
-  const [newTagColor, setNewTagColor] = useState<string>(TAG_COLORS[0]);
 
   // Note Modal state
   const [noteModalOpen, setNoteModalOpen] = useState<boolean>(false);
@@ -243,172 +194,6 @@ export const App: React.FC = () => {
       // ignore storage errors
     }
   }, [settings]);
-
-  // Sidebar width & collapse persistence
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    } catch {
-      // ignore storage errors
-    }
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(sidebarCollapsed));
-    } catch {
-      // ignore storage errors
-    }
-  }, [sidebarCollapsed]);
-
-  // Global mousemove / mouseup listeners while dragging the left sidebar resizer
-  useEffect(() => {
-    if (!isResizingSidebar) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (e.clientX < 90) {
-        setSidebarCollapsed(true);
-        return;
-      }
-      setSidebarCollapsed(false);
-      const clamped = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, e.clientX));
-      setSidebarWidth(clamped);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizingSidebar(false);
-    };
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizingSidebar]);
-
-  const currentFilterParams = useMemo<DocumentFilterParams>(() => {
-    let modifiedAfter: string | undefined;
-    let modifiedBefore: string | undefined;
-    const now = Date.now();
-    if (datePresetFilter === '7d') {
-      modifiedAfter = new Date(now - 7 * 24 * 3600 * 1000).toISOString();
-    } else if (datePresetFilter === '30d') {
-      modifiedAfter = new Date(now - 30 * 24 * 3600 * 1000).toISOString();
-    } else if (datePresetFilter === '365d') {
-      modifiedAfter = new Date(now - 365 * 24 * 3600 * 1000).toISOString();
-    } else if (datePresetFilter === 'custom') {
-      if (customDateAfter) {
-        modifiedAfter = new Date(`${customDateAfter}T00:00:00Z`).toISOString();
-      }
-      if (customDateBefore) {
-        modifiedBefore = new Date(`${customDateBefore}T23:59:59Z`).toISOString();
-      }
-    }
-
-    const minP = minPagesFilter.trim() ? Number.parseInt(minPagesFilter.trim(), 10) : null;
-    const maxP = maxPagesFilter.trim() ? Number.parseInt(maxPagesFilter.trim(), 10) : null;
-    const yFrom = yearFromFilter.trim() ? Number.parseInt(yearFromFilter.trim(), 10) : null;
-    const yTo = yearToFilter.trim() ? Number.parseInt(yearToFilter.trim(), 10) : null;
-
-    return {
-      path: selectedFolderPath || undefined,
-      tag: selectedTagName || undefined,
-      status: selectedStatusFilter || undefined,
-      minPages: minP != null && !Number.isNaN(minP) ? minP : null,
-      maxPages: maxP != null && !Number.isNaN(maxP) ? maxP : null,
-      hasNotes: hasNotesFilter,
-      noteQuery: noteTopicFilter.trim() || undefined,
-      modifiedAfter,
-      modifiedBefore,
-      yearFrom: yFrom != null && !Number.isNaN(yFrom) ? yFrom : null,
-      yearTo: yTo != null && !Number.isNaN(yTo) ? yTo : null,
-      hasMetadata: hasMetadataFilter,
-      sortBy,
-      sortDir,
-      page: 0,
-      size: 100,
-    };
-  }, [
-    selectedFolderPath,
-    selectedTagName,
-    selectedStatusFilter,
-    minPagesFilter,
-    maxPagesFilter,
-    hasNotesFilter,
-    noteTopicFilter,
-    datePresetFilter,
-    customDateAfter,
-    customDateBefore,
-    yearFromFilter,
-    yearToFilter,
-    hasMetadataFilter,
-    sortBy,
-    sortDir,
-  ]);
-
-  const activeFacetCount = useMemo(() => {
-    let count = 0;
-    if (selectedFolderPath) count++;
-    if (selectedTagName) count += selectedTagName.split(',').filter(Boolean).length;
-    if (selectedStatusFilter) count++;
-    if (minPagesFilter.trim() || maxPagesFilter.trim()) count++;
-    if (hasNotesFilter !== null) count++;
-    if (noteTopicFilter.trim()) count++;
-    if (datePresetFilter) count++;
-    if (yearFromFilter.trim() || yearToFilter.trim()) count++;
-    if (hasMetadataFilter !== null) count++;
-    return count;
-  }, [
-    selectedFolderPath,
-    selectedTagName,
-    selectedStatusFilter,
-    minPagesFilter,
-    maxPagesFilter,
-    hasNotesFilter,
-    noteTopicFilter,
-    datePresetFilter,
-    yearFromFilter,
-    yearToFilter,
-    hasMetadataFilter,
-  ]);
-
-  const resetAllFilters = useCallback(() => {
-    setSelectedFolderPath('');
-    setSelectedTagName('');
-    setSelectedStatusFilter('');
-    setMinPagesFilter('');
-    setMaxPagesFilter('');
-    setHasNotesFilter(null);
-    setNoteTopicFilter('');
-    setDatePresetFilter('');
-    setCustomDateAfter('');
-    setCustomDateBefore('');
-    setYearFromFilter('');
-    setYearToFilter('');
-    setHasMetadataFilter(null);
-    setSortBy('fileName');
-    setSortDir('asc');
-  }, []);
-
-  const handleToggleTagFacet = useCallback((tagName: string) => {
-    setSelectedTagName((prev) => {
-      const current = prev
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const exists = current.some((t) => t.toLowerCase() === tagName.toLowerCase());
-      const next = exists
-        ? current.filter((t) => t.toLowerCase() !== tagName.toLowerCase())
-        : [...current, tagName];
-      return next.join(',');
-    });
-  }, []);
 
   const loadLibraryData = useCallback(async () => {
     try {
@@ -477,12 +262,6 @@ export const App: React.FC = () => {
     };
   }, [activeDoc?.id]);
 
-  const totalTocCount = useMemo(() => countTocItems(docOutline), [docOutline]);
-  const activeTocPage = useMemo(
-    () => findActiveTocPage(docOutline, activeViewerPage),
-    [docOutline, activeViewerPage]
-  );
-
   // Load notes when secondary document in Split-View changes
   useEffect(() => {
     if (!secondaryDoc || !splitViewOpen) {
@@ -495,39 +274,6 @@ export const App: React.FC = () => {
       .catch((err) => console.error('Failed to load secondary document notes:', err));
   }, [secondaryDoc?.id, splitViewOpen]);
 
-  // Instant Lucene Search debounce (with optional Faceted Filter integration)
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (!q) {
-      setSearchResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(() => {
-      api
-        .searchLucene(q, applyFacetsToSearch ? currentFilterParams : undefined)
-        .then((res) => {
-          setSearchResults(res);
-          setSearchOpen(true);
-        })
-        .catch((err) => console.error('Search error:', err))
-        .finally(() => setSearching(false));
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [searchQuery, applyFacetsToSearch, currentFilterParams]);
-
-  // Close search popover on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
   const handleOpenDocument = useCallback(
     async (docId: string, explicitPage?: number, noteId?: string) => {
       try {
@@ -535,7 +281,6 @@ export const App: React.FC = () => {
         const targetPage = explicitPage ?? (doc.lastReadPage && doc.lastReadPage > 1 ? doc.lastReadPage : 1);
         setActiveDoc(doc);
         setTargetJump({ page: targetPage, noteId, timestamp: Date.now() });
-        setSearchOpen(false);
       } catch (err) {
         console.error('Failed to open document:', err);
       }
@@ -602,14 +347,6 @@ export const App: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  };
-
-  const handleCreateTag = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTagName.trim()) return;
-    const created = await api.createTag(newTagName.trim(), newTagColor);
-    setTags((prev) => [...prev.filter((t) => t.id !== created.id), created]);
-    setNewTagName('');
   };
 
   const handleDeleteTag = async (tagId: number) => {
@@ -722,7 +459,7 @@ export const App: React.FC = () => {
         {/* Brand & Left Sidebar Toggle */}
         <div className="flex items-center gap-2.5">
           <button
-            onClick={() => setSidebarCollapsed((c) => !c)}
+            onClick={toggleCollapsed}
             className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
             title={
               sidebarCollapsed
@@ -759,108 +496,11 @@ export const App: React.FC = () => {
         </div>
 
         {/* Instant Lucene Search Bar with Auto-Suggest Highlighting */}
-        <div ref={searchBoxRef} className="relative flex-1 max-w-2xl">
-          <div className="relative flex items-center">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onFocus={() => {
-                if (searchQuery.trim()) setSearchOpen(true);
-              }}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search fulltext across all PDF pages (Lucene BM25 + UnifiedHighlighter)…"
-              className="w-full pl-10 pr-9 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/80 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-900 transition"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSearchResults([]);
-                  setSearchOpen(false);
-                }}
-                className="absolute right-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Instant Search Dropdown Results */}
-          {searchOpen && searchQuery.trim() && (
-            <div className="absolute left-0 right-0 mt-2 max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
-              <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  {searching
-                    ? 'Searching Lucene page index…'
-                    : `${searchResults.reduce((acc, g) => acc + g.matches.length, 0)} page matches across ${searchResults.length} documents`}
-                </span>
-                <div className="flex items-center gap-3">
-                  {activeFacetCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setApplyFacetsToSearch((v) => !v)}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border transition ${
-                        applyFacetsToSearch
-                          ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                          : 'border-slate-300 dark:border-slate-700 text-slate-500'
-                      }`}
-                      title="Aktive Facetten-Filter auf die Lucene-Volltextsuche anwenden"
-                    >
-                      <SlidersHorizontal className="w-3 h-3" />
-                      {applyFacetsToSearch
-                        ? `Mit ${activeFacetCount} Filter(n)`
-                        : 'Alle PDFs (ohne Filter)'}
-                    </button>
-                  )}
-                  <span className="hidden sm:inline">Click any passage to jump to page</span>
-                </div>
-              </div>
-
-              {searchResults.length === 0 && !searching ? (
-                <div className="p-8 text-center text-sm text-slate-500">
-                  No fulltext matches found for "{searchQuery}".
-                </div>
-              ) : (
-                searchResults.map((group) => (
-                  <div key={group.docId} className="p-3.5 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => handleOpenDocument(group.docId, group.matches[0]?.pageNumber || 1)}
-                        className="font-semibold text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 text-left"
-                      >
-                        <FileText className="w-4 h-4 shrink-0" />
-                        <span className="truncate">{group.title}</span>
-                      </button>
-                      <span className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
-                        {group.relPath}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5 pl-5">
-                      {group.matches.map((m) => (
-                        <button
-                          key={`${group.docId}-p${m.pageNumber}`}
-                          onClick={() => handleOpenDocument(group.docId, m.pageNumber)}
-                          className="w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition flex items-start gap-2.5 group"
-                        >
-                          <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[11px] font-medium">
-                            p. {m.pageNumber}
-                          </span>
-                          <p
-                            className="search-snippet text-xs text-slate-700 dark:text-slate-300 line-clamp-2 leading-relaxed"
-                            dangerouslySetInnerHTML={{ __html: m.snippetHtml }}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+        <InstantSearchBar
+          activeFacetCount={activeFacetCount}
+          currentFilterParams={currentFilterParams}
+          onNavigateToDocument={(docId, page) => handleOpenDocument(docId, page)}
+        />
 
         {/* Actions */}
         <div className="flex items-center gap-2">
@@ -908,600 +548,125 @@ export const App: React.FC = () => {
 
       {/* 3-Panel Workspace */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left Sidebar: 4 Tabs (Folders, Gliederung/TOC, Tags, Notes) */}
-        {!sidebarCollapsed && (
-          <aside
-            style={{ width: `${sidebarWidth}px` }}
-            className="shrink-0 flex flex-col bg-white dark:bg-slate-900/90 overflow-hidden"
-          >
-            {/* Sidebar Navigation Tabs */}
-            <div className="grid grid-cols-5 border-b border-slate-200 dark:border-slate-800 p-1 gap-1 bg-slate-100/60 dark:bg-slate-950/50">
-              <button
-                onClick={() => setSidebarTab('folders')}
-                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
-                  sidebarTab === 'folders'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Ordner & Dateien"
-              >
-                <Folder className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Folders</span>
-              </button>
-              <button
-                onClick={() => setSidebarTab('outline')}
-                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
-                  sidebarTab === 'outline'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Inhaltsverzeichnis / PDF-Bookmarks (Gliederung)"
-              >
-                <ListTree className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">
-                  Gliederung{totalTocCount > 0 ? ` (${totalTocCount})` : ''}
-                </span>
-              </button>
-              <button
-                onClick={() => setSidebarTab('tags')}
-                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
-                  sidebarTab === 'tags'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Tags"
-              >
-                <TagIcon className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Tags ({tags.length})</span>
-              </button>
-              <button
-                onClick={() => setSidebarTab('notes')}
-                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
-                  sidebarTab === 'notes'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Lesezettel / Notizen"
-              >
-                <BookMarked className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Notes ({globalNotes.length})</span>
-              </button>
-              <button
-                onClick={() => setSidebarTab('rag')}
-                className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-[11px] font-medium transition truncate ${
-                  sidebarTab === 'rag'
-                    ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-                title="Lokaler KI-Assistent (RAG / Ollama)"
-              >
-                <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
-                <span className="truncate">RAG</span>
-              </button>
-            </div>
-
-          {/* Tab 1: Directory Tree */}
-          {sidebarTab === 'folders' && (
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
-              <button
-                onClick={() => {
-                  setSelectedFolderPath('');
-                  setSelectedTagName('');
-                  setSelectedStatusFilter('');
-                  setActiveDoc(null);
-                  setSplitViewOpen(false);
-                }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-                  selectedFolderPath === '' && !activeDoc
-                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                    : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-700 dark:text-slate-300'
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Library className="w-3.5 h-3.5 text-blue-500" />
-                  All Storage Files
-                </span>
-                <span className="text-[11px] font-mono text-slate-400">{totalDocs}</span>
-              </button>
-
-              {tree &&
-                tree.children.map((node) => (
-                  <DirectoryTreeItem
-                    key={node.path}
-                    node={node}
-                    level={0}
-                    selectedFolderPath={selectedFolderPath}
-                    activeDocId={activeDoc?.id || null}
-                    secondaryDocId={splitViewOpen ? secondaryDoc?.id || null : null}
-                    onSelectFolder={(folderPath) => {
-                      setSelectedFolderPath(folderPath);
-                      setActiveDoc(null);
-                      setSplitViewOpen(false);
-                    }}
-                    onSelectFile={(docId) => handleOpenDocument(docId)}
-                    onOpenInSplitView={(docId) => handleOpenInSplitView(docId)}
-                  />
-                ))}
-            </div>
-          )}
-
-          {/* Tab 2: Document Outline / Table of Contents (Gliederung) */}
-          {sidebarTab === 'outline' && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {!activeDoc ? (
-                <div className="text-center py-12 px-4 space-y-2">
-                  <ListTree className="w-7 h-7 text-slate-400 mx-auto stroke-1" />
-                  <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                    Kein Dokument geöffnet
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Öffnen Sie ein PDF-Dokument, um dessen Inhaltsverzeichnis (PDF-Bookmarks) hier anzuzeigen.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between gap-2 px-1">
-                      <span
-                        className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate"
-                        title={activeDoc.fileName}
-                      >
-                        {activeDoc.fileName}
-                      </span>
-                      {totalTocCount > 0 && (
-                        <span className="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                          {totalTocCount}
-                        </span>
-                      )}
-                    </div>
-
-                    {totalTocCount > 4 && (
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
-                        <input
-                          type="text"
-                          value={tocFilter}
-                          onChange={(e) => setTocFilter(e.target.value)}
-                          placeholder="Kapitel filtern…"
-                          className="w-full pl-8 pr-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                    {outlineLoading ? (
-                      <div className="flex items-center justify-center py-10 text-xs text-slate-400 gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                        Lese PDF-Gliederung…
-                      </div>
-                    ) : docOutline.length === 0 ? (
-                      <div className="text-center py-10 px-3 space-y-1.5">
-                        <ListTree className="w-6 h-6 text-slate-400 mx-auto stroke-1" />
-                        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                          Keine PDF-Bookmarks vorhanden
-                        </p>
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Dieses PDF enthält kein eingebettetes Inhaltsverzeichnis (PDDocumentOutline).
-                        </p>
-                      </div>
-                    ) : (
-                      docOutline.map((item, idx) => (
-                        <TocTreeNode
-                          key={`${item.title}-${idx}`}
-                          item={item}
-                          level={0}
-                          filterQuery={tocFilter}
-                          activeTocPage={activeTocPage}
-                          onSelectPage={(page) =>
-                            setTargetJump({ page, timestamp: Date.now() })
-                          }
-                        />
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Tab 3: Tag Browser */}
-          {sidebarTab === 'tags' && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <form
-                onSubmit={handleCreateTag}
-                className="p-3 border-b border-slate-200 dark:border-slate-800 space-y-2.5"
-              >
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Create New Tag
-                </label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={newTagName}
-                    onChange={(e) => setNewTagName(e.target.value)}
-                    placeholder="e.g. Ethnology, Recipes…"
-                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium flex items-center gap-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add
-                  </button>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {TAG_COLORS.map((hex) => (
-                    <button
-                      key={hex}
-                      type="button"
-                      onClick={() => setNewTagColor(hex)}
-                      style={{ backgroundColor: hex }}
-                      className={`w-4 h-4 rounded-full transition ${
-                        newTagColor === hex ? 'ring-2 ring-offset-2 ring-blue-500 scale-110' : 'opacity-70'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </form>
-
-              <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
-                {selectedTagName && (
-                  <button
-                    onClick={() => setSelectedTagName('')}
-                    className="w-full text-left px-2.5 py-1.5 text-xs text-blue-500 hover:underline"
-                  >
-                    ← Clear tag filter ({selectedTagName})
-                  </button>
-                )}
-
-                {tags.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-8">
-                    No tags created yet. Create one above to organize your PDFs.
-                  </p>
-                ) : (
-                  tags.map((tag) => (
-                    <div
-                      key={tag.id}
-                      className={`flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition ${
-                        selectedTagName === tag.name
-                          ? 'bg-blue-500/10 font-semibold text-blue-600 dark:text-blue-400'
-                          : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                      }`}
-                    >
-                      <button
-                        onClick={() => {
-                          setSelectedTagName(tag.name === selectedTagName ? '' : tag.name);
-                          setActiveDoc(null);
-                          setSplitViewOpen(false);
-                        }}
-                        className="flex items-center gap-2 flex-1 text-left truncate"
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: tag.colorHex }}
-                        />
-                        <span className="truncate">{tag.name}</span>
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTag(tag.id)}
-                        className="p-1 text-slate-400 hover:text-red-500"
-                        title="Delete tag"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Tab 3: Global Reading Notes Search */}
-          {sidebarTab === 'notes' && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="p-2.5 border-b border-slate-200 dark:border-slate-800">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    value={noteSearchQuery}
-                    onChange={(e) => setNoteSearchQuery(e.target.value)}
-                    placeholder="Filter reading notes & quotes…"
-                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
-                {globalNotes.length === 0 ? (
-                  <div className="text-center py-10 px-4 space-y-2">
-                    <BookMarked className="w-7 h-7 text-slate-400 mx-auto stroke-1" />
-                    <p className="text-xs text-slate-500">
-                      No reading notes found. Open any PDF and select text on a page to create a Lesezettel!
-                    </p>
-                  </div>
-                ) : (
-                  globalNotes.map((note) => (
-                    <div
-                      key={note.id}
-                      onClick={() => handleOpenDocument(note.documentId, note.pageNumber, note.id)}
-                      className="cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-slate-50/50 dark:bg-slate-800/40 hover:border-amber-500/60 transition space-y-1.5 group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 truncate">
-                          {note.documentTitle}
-                        </span>
-                        <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-semibold">
-                          p. {note.pageNumber}
-                        </span>
-                      </div>
-
-                      {note.selectedText && (
-                        <blockquote className="border-l-2 border-amber-400 pl-2 text-[11px] italic text-slate-500 dark:text-slate-400 line-clamp-2">
-                          "{note.selectedText}"
-                        </blockquote>
-                      )}
-
-                      <p className="text-xs text-slate-800 dark:text-slate-200 line-clamp-3 whitespace-pre-line">
-                        {note.noteMarkdown}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Tab 5: RAG Chat Assistant */}
-          {sidebarTab === 'rag' && (
-            <RagChatTab
-              activeDoc={activeDoc}
-              currentFilterParams={currentFilterParams}
-              customOllamaUrl={settings.customOllamaUrl}
-              ragModel={settings.ragModel}
-              selectedFolderPath={selectedFolderPath}
-              selectedTagName={selectedTagName}
-              onNavigateToDocument={(docId, page) => handleOpenDocument(docId, page)}
-            />
-          )}
-
-          {/* Sidebar Footer: Quick Access to Settings (Einstellungen) */}
-          <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30">
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >
-              <span className="flex items-center gap-2">
-                <Settings className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                Einstellungen
-              </span>
-              <span
-                className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                  settings.showCovers
-                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                    : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
-                }`}
-              >
-                Cover: {settings.showCovers ? 'Ein' : 'Aus'}
-              </span>
-            </button>
-          </div>
-          </aside>
-        )}
-
-        {/* Horizontal Resize Splitter Handle between Left Sidebar and Main Content Area */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Breite der linken Seitenleiste anpassen"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setIsResizingSidebar(true);
+        {/* Left Sidebar: 5 Tabs (Folders, Gliederung/TOC, Tags, Notes, RAG) + Resize Splitter */}
+        <LeftSidebar
+          sidebarTab={sidebarTab}
+          setSidebarTab={setSidebarTab}
+          sidebarWidth={sidebarWidth}
+          sidebarCollapsed={sidebarCollapsed}
+          isResizingSidebar={isResizingSidebar}
+          onStartResizing={startResizing}
+          onResetWidth={resetSidebarWidth}
+          tree={tree}
+          totalDocs={totalDocs}
+          selectedFolderPath={selectedFolderPath}
+          activeDoc={activeDoc}
+          splitViewOpen={splitViewOpen}
+          secondaryDoc={secondaryDoc}
+          onSelectFolder={(path) => {
+            setSelectedFolderPath(path);
+            setActiveDoc(null);
+            setSplitViewOpen(false);
           }}
-          onDoubleClick={() => {
-            setSidebarCollapsed(false);
-            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+          onOpenDocument={handleOpenDocument}
+          onOpenInSplitView={handleOpenInSplitView}
+          docOutline={docOutline}
+          outlineLoading={outlineLoading}
+          tocFilter={tocFilter}
+          setTocFilter={setTocFilter}
+          activeViewerPage={activeViewerPage}
+          onJumpToPage={(page) => setTargetJump({ page, timestamp: Date.now() })}
+          tags={tags}
+          selectedTagName={selectedTagName}
+          setSelectedTagName={(name) => {
+            setSelectedTagName(name);
+            setActiveDoc(null);
+            setSplitViewOpen(false);
           }}
-          title="Ziehen zum Verkleinern/Vergrößern • Doppelklick für Standardbreite (320px)"
-          className={`group relative w-1.5 shrink-0 cursor-col-resize flex items-center justify-center transition-colors z-20 ${
-            isResizingSidebar
-              ? 'bg-blue-600'
-              : 'bg-slate-200/80 dark:bg-slate-800/90 hover:bg-blue-500/60 dark:hover:bg-blue-500/60'
-          }`}
-        >
-          {/* Invisible wider hit-area for effortless grabbing */}
-          <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
-          <div
-            className={`pointer-events-none flex items-center justify-center w-3.5 h-8 rounded-full border shadow-xs transition-opacity ${
-              isResizingSidebar
-                ? 'opacity-100 bg-blue-600 border-blue-400 text-white'
-                : 'opacity-0 group-hover:opacity-100 bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-300'
-            }`}
-          >
-            <GripVertical className="w-3 h-3" />
-          </div>
-        </div>
+          onCreateTag={async (name, colorHex) => {
+            const created = await api.createTag(name, colorHex);
+            setTags((prev) => [...prev.filter((t) => t.id !== created.id), created]);
+          }}
+          onDeleteTag={handleDeleteTag}
+          globalNotes={globalNotes}
+          noteSearchQuery={noteSearchQuery}
+          setNoteSearchQuery={setNoteSearchQuery}
+          currentFilterParams={currentFilterParams}
+          settings={settings}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
 
         {/* Main Content Area: Either PDF.js Reader (+ Optional Split-View & Inspector) OR Document Explorer */}
         <main className="flex-1 flex min-w-0 overflow-hidden">
           {activeDoc ? (
-            <>
-              {/* Reader Area: Single or Side-by-Side Split-View */}
-              <div className="flex-1 flex min-w-0 h-full divide-x divide-slate-200 dark:divide-slate-800">
-                {/* Primary PDF Viewer */}
-                <div className="flex-1 min-w-0 h-full">
-                  <PdfViewer
-                    document={activeDoc}
-                    notes={docNotes}
-                    targetJump={targetJump}
-                    inspectorOpen={inspectorOpen}
-                    defaultViewMode={settings.defaultViewMode}
-                    isSplitView={splitViewOpen}
-                    isSecondaryPane={false}
-                    onToggleInspector={() => setInspectorOpen((o) => !o)}
-                    onToggleSplitView={handleToggleSplitView}
-                    onUpdateProgress={handleUpdateReadingProgress}
-                    onPageChange={setActiveViewerPage}
-                    onRequestCreateNote={(sel) => {
-                      setEditingNote(null);
-                      setPendingSelection(sel);
-                      setNoteModalOpen(true);
-                    }}
-                    onSelectNote={(note) => {
-                      setInspectorOpen(true);
-                      setTargetJump({
-                        page: note.pageNumber,
-                        noteId: note.id,
-                        timestamp: Date.now(),
-                      });
-                    }}
-                  />
-                </div>
-
-                {/* Secondary PDF Viewer (Split-View Mode) */}
-                {splitViewOpen && secondaryDoc && (
-                  <div className="flex-1 min-w-0 h-full">
-                    <PdfViewer
-                      document={secondaryDoc}
-                      notes={secondaryDocNotes}
-                      targetJump={secondaryTargetJump}
-                      inspectorOpen={inspectorOpen}
-                      defaultViewMode={settings.defaultViewMode}
-                      isSplitView={true}
-                      isSecondaryPane={true}
-                      availableDocuments={allDocumentsList.length > 0 ? allDocumentsList : documents}
-                      onCloseSecondaryPane={() => setSplitViewOpen(false)}
-                      onChangeSecondaryDocument={(newDocId) => handleOpenInSplitView(newDocId)}
-                      onUpdateProgress={handleUpdateReadingProgress}
-                      onRequestCreateNote={(sel) => {
-                        setEditingNote(null);
-                        setPendingSelection(sel);
-                        setNoteModalOpen(true);
-                      }}
-                      onSelectNote={(note) => {
-                        setInspectorOpen(true);
-                        setSecondaryTargetJump({
-                          page: note.pageNumber,
-                          noteId: note.id,
-                          timestamp: Date.now(),
-                        });
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Right Split-Pane Inspector: Reading Status, Document Tags & Reading Notes (Lesezettel) */}
-              {inspectorOpen && (
-                <RightInspector
-                  activeDoc={activeDoc}
-                  tags={tags}
-                  docNotes={docNotes}
-                  enrichingDoc={enrichingDoc}
-                  onUpdateReadingProgress={handleUpdateReadingProgress}
-                  onEnrichActiveDoc={handleEnrichActiveDoc}
-                  onSaveMetadata={handleSaveMetadata}
-                  onToggleDocTag={handleToggleDocTag}
-                  onOpenNewNoteModal={(pageNumber) => {
-                    setEditingNote(null);
-                    setPendingSelection({
-                      documentId: activeDoc.id,
-                      pageNumber: targetJump?.page || pageNumber || 1,
-                      selectedText: '',
-                      boundingBox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.16 },
-                    });
-                    setNoteModalOpen(true);
-                  }}
-                  onEditNote={(note) => {
-                    setEditingNote(note);
-                    setNoteModalOpen(true);
-                  }}
-                  onDeleteNote={handleDeleteNote}
-                  onSelectNote={(note) => {
-                    setTargetJump({
-                      page: note.pageNumber,
-                      noteId: note.id,
-                      timestamp: Date.now(),
-                    });
-                  }}
-                />
-              )}
-            </>
+            <ReaderWorkspace
+              activeDoc={activeDoc}
+              docNotes={docNotes}
+              targetJump={targetJump}
+              inspectorOpen={inspectorOpen}
+              settings={settings}
+              splitViewOpen={splitViewOpen}
+              secondaryDoc={secondaryDoc}
+              secondaryDocNotes={secondaryDocNotes}
+              secondaryTargetJump={secondaryTargetJump}
+              availableDocuments={allDocumentsList.length > 0 ? allDocumentsList : documents}
+              tags={tags}
+              enrichingDoc={enrichingDoc}
+              onToggleInspector={() => setInspectorOpen((o) => !o)}
+              onToggleSplitView={handleToggleSplitView}
+              onCloseSecondaryPane={() => setSplitViewOpen(false)}
+              onChangeSecondaryDocument={(newDocId) => handleOpenInSplitView(newDocId)}
+              onUpdateReadingProgress={handleUpdateReadingProgress}
+              onPageChange={setActiveViewerPage}
+              onRequestCreateNote={(sel) => {
+                setEditingNote(null);
+                setPendingSelection(sel);
+                setNoteModalOpen(true);
+              }}
+              onSelectPrimaryNote={(note) => {
+                setInspectorOpen(true);
+                setTargetJump({
+                  page: note.pageNumber,
+                  noteId: note.id,
+                  timestamp: Date.now(),
+                });
+              }}
+              onSelectSecondaryNote={(note) => {
+                setInspectorOpen(true);
+                setSecondaryTargetJump({
+                  page: note.pageNumber,
+                  noteId: note.id,
+                  timestamp: Date.now(),
+                });
+              }}
+              onEnrichActiveDoc={handleEnrichActiveDoc}
+              onSaveMetadata={handleSaveMetadata}
+              onToggleDocTag={handleToggleDocTag}
+              onOpenNewNoteModal={(pageNumber) => {
+                setEditingNote(null);
+                setPendingSelection({
+                  documentId: activeDoc.id,
+                  pageNumber: targetJump?.page || pageNumber || 1,
+                  selectedText: '',
+                  boundingBox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.16 },
+                });
+                setNoteModalOpen(true);
+              }}
+              onEditNote={(note) => {
+                setEditingNote(note);
+                setNoteModalOpen(true);
+              }}
+              onDeleteNote={handleDeleteNote}
+            />
           ) : (
             /* Document Explorer Grid/List View */
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Continue Reading ("Weiterlesen / Zuletzt gelesen") Shelf */}
-              {activeFacetCount === 0 && recentDocuments.length > 0 && (
-                <section className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-500" />
-                      Zuletzt gelesen & Weiterlesen
-                    </h2>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                    {recentDocuments.slice(0, 3).map((doc) => {
-                      const pct = Math.min(
-                        100,
-                        Math.max(
-                          0,
-                          Math.round(((doc.lastReadPage || 1) / Math.max(1, doc.pageCount || 1)) * 100)
-                        )
-                      );
-                      return (
-                        <div
-                          key={`recent-${doc.id}`}
-                          onClick={() => handleOpenDocument(doc.id, doc.lastReadPage || 1)}
-                          className="group cursor-pointer rounded-xl border border-amber-500/30 dark:border-amber-500/20 bg-gradient-to-br from-amber-500/5 via-white to-white dark:from-amber-500/10 dark:via-slate-900 dark:to-slate-900 p-3.5 shadow-xs hover:shadow-md hover:border-amber-500/60 transition flex flex-col justify-between gap-3"
-                        >
-                          <div className="flex items-start justify-between gap-2.5">
-                            <div className="min-w-0 flex-1">
-                              <h3
-                                className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate"
-                                title={doc.metaTitle || doc.fileName}
-                              >
-                                {doc.metaTitle || doc.fileName}
-                              </h3>
-                              {(doc.authors || doc.publicationYear) && (
-                                <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
-                                  {doc.authors}
-                                  {doc.authors && doc.publicationYear ? ' • ' : ''}
-                                  {doc.publicationYear ?? ''}
-                                </p>
-                              )}
-                              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
-                                {doc.relativePath}
-                              </p>
-                            </div>
-                            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-slate-950 font-semibold text-[11px] shadow-xs group-hover:scale-105 transition">
-                              <Play className="w-3 h-3 fill-current" />
-                              S. {doc.lastReadPage || 1}
-                            </span>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                              <span>
-                                Seite {doc.lastReadPage || 1} von {doc.pageCount}
-                              </span>
-                              <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
-                                {pct}%
-                              </span>
-                            </div>
-                            <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                              <div
-                                className="h-full bg-amber-500 rounded-full transition-all"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
+              {activeFacetCount === 0 && (
+                <ContinueReadingShelf
+                  recentDocuments={recentDocuments}
+                  onOpenDocument={handleOpenDocument}
+                />
               )}
 
               {/* Library Header, Quick Discovery Bar & Faceted Filters */}
@@ -1526,468 +691,44 @@ export const App: React.FC = () => {
                         : ''}
                     </p>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Reading Status Filter Pills with Facet Counts */}
-                    <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                      {(
-                        [
-                          { value: '', label: 'Alle', count: facets?.totalDocuments },
-                          { value: 'READING', label: 'Am Lesen', count: facets?.readingCount },
-                          { value: 'UNREAD', label: 'Ungelesen', count: facets?.unreadCount },
-                          { value: 'COMPLETED', label: 'Gelesen', count: facets?.completedCount },
-                        ] as const
-                      ).map((tab) => (
-                        <button
-                          key={tab.value}
-                          onClick={() => setSelectedStatusFilter(tab.value)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
-                            selectedStatusFilter === tab.value
-                              ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                          }`}
-                        >
-                          <span>{tab.label}</span>
-                          {tab.count !== undefined && (
-                            <span className="text-[10px] font-mono opacity-70">({tab.count})</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Sort Selector */}
-                    <div className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs">
-                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <select
-                        value={`${sortBy}:${sortDir}`}
-                        onChange={(e) => {
-                          const [field, dir] = e.target.value.split(':');
-                          setSortBy(field);
-                          setSortDir((dir as 'asc' | 'desc') || 'asc');
-                        }}
-                        aria-label="Sortierung"
-                        className="bg-transparent text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
-                      >
-                        <option value="fileName:asc" className="bg-white dark:bg-slate-900">
-                          Titel / Dateiname (A–Z)
-                        </option>
-                        <option value="fileName:desc" className="bg-white dark:bg-slate-900">
-                          Titel / Dateiname (Z–A)
-                        </option>
-                        <option value="lastModifiedFs:desc" className="bg-white dark:bg-slate-900">
-                          Dateidatum (Neueste zuerst)
-                        </option>
-                        <option value="lastModifiedFs:asc" className="bg-white dark:bg-slate-900">
-                          Dateidatum (Älteste zuerst)
-                        </option>
-                        <option value="pageCount:desc" className="bg-white dark:bg-slate-900">
-                          Seitenanzahl (Absteigend)
-                        </option>
-                        <option value="pageCount:asc" className="bg-white dark:bg-slate-900">
-                          Seitenanzahl (Aufsteigend)
-                        </option>
-                        <option value="publicationYear:desc" className="bg-white dark:bg-slate-900">
-                          Erscheinungsjahr (Neueste)
-                        </option>
-                        <option value="noteCount:desc" className="bg-white dark:bg-slate-900">
-                          Meiste Lesezettel
-                        </option>
-                        <option value="lastOpenedAt:desc" className="bg-white dark:bg-slate-900">
-                          Zuletzt geöffnet
-                        </option>
-                      </select>
-                    </div>
-
-                    {/* Toggle Faceted Discovery Panel */}
-                    <button
-                      type="button"
-                      onClick={() => setFacetsPanelOpen((o) => !o)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-                        facetsPanelOpen || activeFacetCount > 0
-                          ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                      <span>Facettierte Filter</span>
-                      {activeFacetCount > 0 && (
-                        <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-mono">
-                          {activeFacetCount}
-                        </span>
-                      )}
-                    </button>
-
-                    {activeFacetCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={resetAllFilters}
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
-                      >
-                        Alle Filter zurücksetzen
-                      </button>
-                    )}
-                  </div>
                 </div>
 
-                {/* Quick Discovery Filter Bar (1-Click Smart Facets + Note Topic Search) */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Direct "Zeige mir alle Paper mit Notizen zum Thema X" Input */}
-                  <div className="relative min-w-[240px] sm:min-w-[290px]">
-                    <BookMarked className="w-3.5 h-3.5 text-amber-500 absolute left-3 top-2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={noteTopicFilter}
-                      onChange={(e) => setNoteTopicFilter(e.target.value)}
-                      placeholder="PDFs mit Notizen zum Thema X filtern…"
-                      className="w-full pl-8 pr-7 py-1 rounded-full border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                    {noteTopicFilter && (
-                      <button
-                        type="button"
-                        onClick={() => setNoteTopicFilter('')}
-                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Quick Chip: Only Documents with Reading Notes */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setHasNotesFilter((prev) => (prev === true ? null : true))
-                    }
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition ${
-                      hasNotesFilter === true
-                        ? 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-amber-500/50'
-                    }`}
-                  >
-                    <BookMarked className="w-3 h-3 text-amber-500" />
-                    <span>Mit Lesezetteln</span>
-                    {facets && (
-                      <span className="text-[10px] font-mono opacity-75">
-                        ({facets.withNotesCount})
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Quick Chip: Only Documents with DOI / ISBN Metadata */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setHasMetadataFilter((prev) => (prev === true ? null : true))
-                    }
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition ${
-                      hasMetadataFilter === true
-                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-emerald-500/50'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3 text-emerald-500" />
-                    <span>Mit DOI / ISBN</span>
-                    {facets && (
-                      <span className="text-[10px] font-mono opacity-75">
-                        ({facets.withMetadataCount})
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Quick Page Range Buckets */}
-                  {(
-                    [
-                      {
-                        label: 'Kurz (1–20 S.)',
-                        min: '1',
-                        max: '20',
-                        count: facets?.shortDocsCount,
-                      },
-                      {
-                        label: 'Mittel (21–100 S.)',
-                        min: '21',
-                        max: '100',
-                        count: facets?.mediumDocsCount,
-                      },
-                      {
-                        label: 'Buch (101+ S.)',
-                        min: '101',
-                        max: '',
-                        count: facets?.longDocsCount,
-                      },
-                    ] as const
-                  ).map((bucket) => {
-                    const isBucketActive =
-                      minPagesFilter === bucket.min && maxPagesFilter === bucket.max;
-                    return (
-                      <button
-                        key={bucket.label}
-                        type="button"
-                        onClick={() => {
-                          if (isBucketActive) {
-                            setMinPagesFilter('');
-                            setMaxPagesFilter('');
-                          } else {
-                            setMinPagesFilter(bucket.min);
-                            setMaxPagesFilter(bucket.max);
-                          }
-                        }}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition ${
-                          isBucketActive
-                            ? 'border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:border-blue-500/40'
-                        }`}
-                      >
-                        <span>{bucket.label}</span>
-                        {bucket.count !== undefined && (
-                          <span className="text-[10px] font-mono opacity-75">
-                            ({bucket.count})
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Expanded Faceted Filter Drawer */}
-                {facetsPanelOpen && (
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                      {/* Facet Column 1: Lesezettel & Themen-Filter */}
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                          <BookMarked className="w-3.5 h-3.5 text-amber-500" />
-                          Lesezettel & Zitate
-                        </label>
-                        <div className="grid grid-cols-3 gap-1">
-                          {(
-                            [
-                              { val: null, label: 'Alle' },
-                              { val: true, label: 'Mit Notizen' },
-                              { val: false, label: 'Ohne Notizen' },
-                            ] as const
-                          ).map((opt) => (
-                            <button
-                              key={String(opt.val)}
-                              type="button"
-                              onClick={() => setHasNotesFilter(opt.val)}
-                              className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition ${
-                                hasNotesFilter === opt.val
-                                  ? 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                        <input
-                          type="text"
-                          value={noteTopicFilter}
-                          onChange={(e) => setNoteTopicFilter(e.target.value)}
-                          placeholder="Notizen zum Thema X (z.B. Qubits)…"
-                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                      </div>
-
-                      {/* Facet Column 2: Seitenanzahl-Bereich */}
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-blue-500" />
-                            Seitenanzahl-Bereich
-                          </span>
-                          {facets && facets.maxPageCount > 0 && (
-                            <span className="font-mono text-[10px] text-slate-400">
-                              {facets.minPageCount}–{facets.maxPageCount} S.
-                            </span>
-                          )}
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <span className="text-[10px] text-slate-400 block mb-0.5">
-                              Mindestseiten
-                            </span>
-                            <input
-                              type="number"
-                              min={1}
-                              value={minPagesFilter}
-                              onChange={(e) => setMinPagesFilter(e.target.value)}
-                              placeholder={facets ? String(facets.minPageCount || 1) : '1'}
-                              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-slate-400 block mb-0.5">
-                              Höchstseiten
-                            </span>
-                            <input
-                              type="number"
-                              min={1}
-                              value={maxPagesFilter}
-                              onChange={(e) => setMaxPagesFilter(e.target.value)}
-                              placeholder={facets ? String(facets.maxPageCount || 500) : '500'}
-                              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Facet Column 3: Dateidatum (Filesystem) */}
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-indigo-500" />
-                          Dateidatum (Geändert)
-                        </label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-                          {(
-                            [
-                              { id: '', label: 'Alle' },
-                              { id: '7d', label: '7 Tage' },
-                              { id: '30d', label: '30 Tage' },
-                              { id: '365d', label: '1 Jahr' },
-                              { id: 'custom', label: 'Zeitraum…' },
-                            ] as const
-                          ).map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => setDatePresetFilter(preset.id)}
-                              className={`py-1 px-2 rounded-lg text-xs font-medium border transition ${
-                                datePresetFilter === preset.id
-                                  ? 'border-indigo-500 bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
-                                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                              }`}
-                            >
-                              {preset.label}
-                            </button>
-                          ))}
-                        </div>
-                        {datePresetFilter === 'custom' && (
-                          <div className="grid grid-cols-2 gap-1.5 pt-1">
-                            <input
-                              type="date"
-                              value={customDateAfter}
-                              onChange={(e) => setCustomDateAfter(e.target.value)}
-                              className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <input
-                              type="date"
-                              value={customDateBefore}
-                              onChange={(e) => setCustomDateBefore(e.target.value)}
-                              className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Facet Column 4: Erscheinungsjahr & DOI/ISBN */}
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-                            Publikationsjahr & DOI/ISBN
-                          </span>
-                          {facets?.minPublicationYear && facets?.maxPublicationYear && (
-                            <span className="font-mono text-[10px] text-slate-400">
-                              {facets.minPublicationYear}–{facets.maxPublicationYear}
-                            </span>
-                          )}
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="number"
-                            value={yearFromFilter}
-                            onChange={(e) => setYearFromFilter(e.target.value)}
-                            placeholder="Ab Jahr (z.B. 2015)"
-                            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          />
-                          <input
-                            type="number"
-                            value={yearToFilter}
-                            onChange={(e) => setYearToFilter(e.target.value)}
-                            placeholder="Bis Jahr (z.B. 2026)"
-                            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {(
-                            [
-                              { val: null, label: 'Alle' },
-                              { val: true, label: 'Mit DOI/ISBN' },
-                              { val: false, label: 'Ohne Meta' },
-                            ] as const
-                          ).map((opt) => (
-                            <button
-                              key={String(opt.val)}
-                              type="button"
-                              onClick={() => setHasMetadataFilter(opt.val)}
-                              className={`py-1 px-2 rounded-lg text-[11px] font-medium border transition ${
-                                hasMetadataFilter === opt.val
-                                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Tag Facets Row (Multi-Select) */}
-                    {facets && facets.tags.length > 0 && (
-                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                            <TagIcon className="w-3.5 h-3.5" />
-                            Nach Tags filtern (Kombination möglich)
-                          </span>
-                          {selectedTagName && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTagName('')}
-                              className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                              Tag-Auswahl aufheben
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {facets.tags.map((tf) => {
-                            const selectedSet = selectedTagName
-                              .split(',')
-                              .map((s) => s.trim().toLowerCase())
-                              .filter(Boolean);
-                            const isSelected = selectedSet.includes(tf.name.toLowerCase());
-                            return (
-                              <button
-                                key={tf.id}
-                                type="button"
-                                onClick={() => handleToggleTagFacet(tf.name)}
-                                style={{
-                                  borderColor: tf.colorHex,
-                                  backgroundColor: isSelected ? tf.colorHex : `${tf.colorHex}14`,
-                                  color: isSelected ? '#ffffff' : tf.colorHex,
-                                }}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition hover:scale-105"
-                              >
-                                <span>#{tf.name}</span>
-                                <span
-                                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                                    isSelected ? 'bg-black/20 text-white' : 'bg-black/5 dark:bg-white/10'
-                                  }`}
-                                >
-                                  {tf.documentCount}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <FacetedFilterBar
+                  facets={facets}
+                  activeFacetCount={activeFacetCount}
+                  selectedStatusFilter={selectedStatusFilter}
+                  setSelectedStatusFilter={setSelectedStatusFilter}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  setSortBy={setSortBy}
+                  setSortDir={setSortDir}
+                  facetsPanelOpen={facetsPanelOpen}
+                  setFacetsPanelOpen={setFacetsPanelOpen}
+                  resetAllFilters={resetAllFilters}
+                  noteTopicFilter={noteTopicFilter}
+                  setNoteTopicFilter={setNoteTopicFilter}
+                  hasNotesFilter={hasNotesFilter}
+                  setHasNotesFilter={setHasNotesFilter}
+                  hasMetadataFilter={hasMetadataFilter}
+                  setHasMetadataFilter={setHasMetadataFilter}
+                  minPagesFilter={minPagesFilter}
+                  setMinPagesFilter={setMinPagesFilter}
+                  maxPagesFilter={maxPagesFilter}
+                  setMaxPagesFilter={setMaxPagesFilter}
+                  datePresetFilter={datePresetFilter}
+                  setDatePresetFilter={setDatePresetFilter}
+                  customDateAfter={customDateAfter}
+                  setCustomDateAfter={setCustomDateAfter}
+                  customDateBefore={customDateBefore}
+                  setCustomDateBefore={setCustomDateBefore}
+                  yearFromFilter={yearFromFilter}
+                  setYearFromFilter={setYearFromFilter}
+                  yearToFilter={yearToFilter}
+                  setYearToFilter={setYearToFilter}
+                  selectedTagName={selectedTagName}
+                  onToggleTagFacet={handleToggleTagFacet}
+                  onClearTags={() => setSelectedTagName('')}
+                />
               </div>
 
               {documents.length === 0 ? (
@@ -2044,138 +785,6 @@ export const App: React.FC = () => {
         onCoversCleared={() => setCoverCacheVersion((v) => v + 1)}
         onMetadataEnriched={loadLibraryData}
       />
-    </div>
-  );
-};
-
-interface DirectoryTreeItemProps {
-  node: TreeNode;
-  level: number;
-  selectedFolderPath: string;
-  activeDocId: string | null;
-  secondaryDocId: string | null;
-  onSelectFolder: (path: string) => void;
-  onSelectFile: (docId: string) => void;
-  onOpenInSplitView: (docId: string) => void;
-}
-
-const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
-  node,
-  level,
-  selectedFolderPath,
-  activeDocId,
-  secondaryDocId,
-  onSelectFolder,
-  onSelectFile,
-  onOpenInSplitView,
-}) => {
-  const [expanded, setExpanded] = useState<boolean>(level < 2);
-
-  if (node.type === 'file') {
-    const isSelected = node.documentId !== null && node.documentId === activeDocId;
-    const isSecondary = node.documentId !== null && node.documentId === secondaryDocId;
-    return (
-      <div
-        style={{ paddingLeft: `${level * 12 + 10}px` }}
-        className={`group w-full flex items-center justify-between pr-1.5 py-1 rounded-lg text-xs transition ${
-          isSelected
-            ? 'bg-blue-600 text-white font-medium'
-            : isSecondary
-            ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-medium'
-            : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-600 dark:text-slate-300'
-        }`}
-        title={node.path}
-      >
-        <button
-          onClick={() => node.documentId && onSelectFile(node.documentId)}
-          className="flex items-center gap-1.5 min-w-0 flex-1 text-left py-0.5"
-        >
-          <FileText className="w-3.5 h-3.5 shrink-0 opacity-75" />
-          <span className="truncate">{node.name}</span>
-        </button>
-
-        <div className="flex items-center gap-1 shrink-0 ml-1">
-          {activeDocId && node.documentId && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenInSplitView(node.documentId!);
-              }}
-              className={`opacity-0 group-hover:opacity-100 p-1 rounded transition ${
-                isSelected
-                  ? 'hover:bg-blue-500 text-white'
-                  : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500'
-              }`}
-              title="Im Split-View rechts öffnen"
-            >
-              <Columns2 className="w-3 h-3" />
-            </button>
-          )}
-          {node.pageCount !== null && (
-            <span
-              className={`text-[10px] font-mono ${
-                isSelected ? 'text-blue-100' : 'text-slate-400'
-              }`}
-            >
-              {node.pageCount}p
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const isFolderSelected = selectedFolderPath === node.path;
-
-  return (
-    <div>
-      <div
-        style={{ paddingLeft: `${level * 12 + 6}px` }}
-        className={`flex items-center justify-between pr-2 py-1.5 rounded-lg text-xs cursor-pointer transition ${
-          isFolderSelected
-            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold'
-            : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-700 dark:text-slate-300'
-        }`}
-      >
-        <div
-          onClick={() => {
-            setExpanded((e) => !e);
-            onSelectFolder(node.path);
-          }}
-          className="flex items-center gap-1.5 flex-1 min-w-0"
-        >
-          {expanded ? (
-            <ChevronDown className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-          )}
-          {expanded ? (
-            <FolderOpen className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-          ) : (
-            <Folder className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-          )}
-          <span className="truncate">{node.name}</span>
-        </div>
-      </div>
-
-      {expanded && node.children.length > 0 && (
-        <div className="space-y-0.5 mt-0.5">
-          {node.children.map((child) => (
-            <DirectoryTreeItem
-              key={child.path}
-              node={child}
-              level={level + 1}
-              selectedFolderPath={selectedFolderPath}
-              activeDocId={activeDocId}
-              secondaryDocId={secondaryDocId}
-              onSelectFolder={onSelectFolder}
-              onSelectFile={onSelectFile}
-              onOpenInSplitView={onOpenInSplitView}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 };
