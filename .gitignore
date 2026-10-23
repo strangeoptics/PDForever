@@ -13,4 +13,5 @@ src/main/resources/static/
 .idea/
 .vscode/
 *.iml
+analysis/
 
