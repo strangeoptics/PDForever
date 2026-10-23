@@ -1,5 +1,8 @@
 target/
 data/
+storage/
+*.pdf
+*.PDF
 *.db
 *.db-shm
 *.db-wal

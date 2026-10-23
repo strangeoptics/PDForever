@@ -52,6 +52,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   onSelectNote,
 }) => {
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [defaultPageSize, setDefaultPageSize] = useState<{ width: number; height: number }>({
+    width: 612,
+    height: 792,
+  });
   const [numPages, setNumPages] = useState<number>(docItem.pageCount || 0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageInput, setPageInput] = useState<string>('1');
@@ -82,7 +86,23 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     });
 
     loadingTask.promise
-      .then((loadedPdf) => {
+      .then(async (loadedPdf) => {
+        if (cancelled) {
+          loadedPdf.destroy();
+          return;
+        }
+        try {
+          const firstPage = await loadedPdf.getPage(1);
+          const unscaledViewport = firstPage.getViewport({ scale: 1 });
+          if (!cancelled) {
+            setDefaultPageSize({
+              width: unscaledViewport.width,
+              height: unscaledViewport.height,
+            });
+          }
+        } catch {
+          // Fallback to standard dimensions if page 1 metadata fails
+        }
         if (cancelled) {
           loadedPdf.destroy();
           return;
@@ -123,12 +143,18 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   useEffect(() => {
     if (!targetJump || !pdfDoc) return;
     const targetPage = Math.max(1, Math.min(numPages || 1, targetJump.page));
-    requestAnimationFrame(() => {
+    const scrollToTarget = () => {
       const pageEl = pageRefs.current.get(targetPage);
       if (pageEl) {
-        pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        pageEl.scrollIntoView({ behavior: 'auto', block: 'start' });
       }
+    };
+    const rafId = requestAnimationFrame(() => {
+      scrollToTarget();
+      // Re-verify position after target page layout settles
+      setTimeout(scrollToTarget, 80);
     });
+    return () => cancelAnimationFrame(rafId);
   }, [targetJump, pdfDoc, numPages, viewMode]);
 
   const goToPage = useCallback(
@@ -386,6 +412,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
                 pdfDoc={pdfDoc}
                 pageNumber={pageNumber}
                 scale={scale}
+                defaultPageSize={defaultPageSize}
                 pageNotes={pageNotes}
                 highlightedNoteId={highlightedNoteId}
                 onSelectNote={onSelectNote}
@@ -405,6 +432,7 @@ interface PdfPageSurfaceProps {
   pdfDoc: pdfjsLib.PDFDocumentProxy;
   pageNumber: number;
   scale: number;
+  defaultPageSize: { width: number; height: number };
   pageNotes: ReadingNote[];
   highlightedNoteId: string | null;
   onSelectNote: (note: ReadingNote) => void;
@@ -415,6 +443,7 @@ const PdfPageSurface: React.FC<PdfPageSurfaceProps> = ({
   pdfDoc,
   pageNumber,
   scale,
+  defaultPageSize,
   pageNotes,
   highlightedNoteId,
   onSelectNote,
@@ -425,9 +454,18 @@ const PdfPageSurface: React.FC<PdfPageSurfaceProps> = ({
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const [isVisible, setIsVisible] = useState<boolean>(pageNumber <= 3);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
-    width: Math.round(612 * scale),
-    height: Math.round(792 * scale),
+    width: Math.floor(defaultPageSize.width * scale),
+    height: Math.floor(defaultPageSize.height * scale),
   });
+
+  useEffect(() => {
+    if (!isVisible) {
+      setDimensions({
+        width: Math.floor(defaultPageSize.width * scale),
+        height: Math.floor(defaultPageSize.height * scale),
+      });
+    }
+  }, [defaultPageSize, scale, isVisible]);
 
   // Lazy-render pages via IntersectionObserver so 500+ page books stay fast & low-memory
   useEffect(() => {
