@@ -56,7 +56,20 @@ export const api = {
     if (params.sortDir) sp.set('sortDir', params.sortDir);
     sp.set('page', String(params.page ?? 0));
     sp.set('size', String(params.size ?? 50));
-    return fetch(`${API_BASE}/documents?${sp.toString()}`).then(handleJson<PaginatedResponse<DocumentItem>>);
+    return fetch(`${API_BASE}/documents?${sp.toString()}`)
+      .then(handleJson<any>)
+      .then((res: any) => {
+        if (res && res.page) {
+          return {
+            content: res.content ?? [],
+            totalElements: res.page.totalElements ?? 0,
+            totalPages: res.page.totalPages ?? 0,
+            number: res.page.number ?? 0,
+            size: res.page.size ?? 0,
+          };
+        }
+        return res as PaginatedResponse<DocumentItem>;
+      });
   },
 
   getDocumentFacets(path?: string): Promise<DocumentFacets> {
