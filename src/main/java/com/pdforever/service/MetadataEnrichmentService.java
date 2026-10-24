@@ -1,8 +1,10 @@
 package com.pdforever.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pdforever.domain.Document;
+import com.pdforever.service.metadata.EnrichedMetadata;
+import com.pdforever.service.metadata.MetadataProvider;
+import com.pdforever.service.metadata.MetadataQuery;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.RandomAccessReadBufferedFile;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -14,14 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -35,7 +30,6 @@ public class MetadataEnrichmentService {
 
     private static final Logger log = LoggerFactory.getLogger(MetadataEnrichmentService.class);
 
-    private static final String USER_AGENT = "PDForever/1.0 (In-Place Personal Library; mailto:pdforever@localhost)";
     private static final int MAX_PAGES_TO_SCAN = 3;
 
     /**
@@ -79,33 +73,32 @@ public class MetadataEnrichmentService {
 
     private final ObjectMapper objectMapper;
     private final FileNameCleaner fileNameCleaner;
-    private final HttpClient httpClient;
+    private final List<MetadataProvider> providers;
 
     @Value("${library.metadata-lookup-enabled:true}")
     private boolean externalLookupEnabled = true;
 
     public MetadataEnrichmentService(ObjectMapper objectMapper, FileNameCleaner fileNameCleaner) {
-        this.objectMapper = objectMapper;
-        this.fileNameCleaner = fileNameCleaner;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(4))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        this(objectMapper, fileNameCleaner, List.of());
     }
 
-    public record EnrichedMetadata(
-            String doi,
-            String isbn,
-            String title,
-            String authors,
-            Integer publicationYear,
-            String abstractText,
-            String source
+    @org.springframework.beans.factory.annotation.Autowired
+    public MetadataEnrichmentService(
+            ObjectMapper objectMapper,
+            FileNameCleaner fileNameCleaner,
+            List<MetadataProvider> providers
     ) {
+        this.objectMapper = objectMapper;
+        this.fileNameCleaner = fileNameCleaner;
+        this.providers = providers != null ? providers : List.of();
     }
 
     public void setExternalLookupEnabled(boolean enabled) {
         this.externalLookupEnabled = enabled;
+    }
+
+    public List<MetadataProvider> getProviders() {
+        return providers;
     }
 
     /**
@@ -170,29 +163,21 @@ public class MetadataEnrichmentService {
             changed = true;
         }
 
-        // 1. Query CrossRef & Semantic Scholar if DOI is available and external lookup is permitted
-        if (allowExternalLookup && externalLookupEnabled && detectedDoi != null) {
-            Optional<EnrichedMetadata> doiMeta = lookupByDoi(detectedDoi);
-            if (doiMeta.isPresent()) {
-                applyMetadataToDocument(doc, doiMeta.get());
-                if (doc.getPublicationYear() == null) {
-                    extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
-                            .ifPresent(doc::setPublicationYear);
+        // 1. Query pluggable external metadata providers if enabled and permitted
+        if (allowExternalLookup && externalLookupEnabled && (detectedDoi != null || detectedIsbn != null)) {
+            MetadataQuery query = MetadataQuery.of(detectedDoi, detectedIsbn, doc.getMetaTitle(), doc.getAuthors());
+            for (MetadataProvider provider : providers) {
+                if (provider.supports(query)) {
+                    Optional<EnrichedMetadata> enrichedOpt = provider.lookup(query);
+                    if (enrichedOpt.isPresent()) {
+                        applyMetadataToDocument(doc, enrichedOpt.get());
+                        if (doc.getPublicationYear() == null) {
+                            extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                                    .ifPresent(doc::setPublicationYear);
+                        }
+                        return true;
+                    }
                 }
-                return true;
-            }
-        }
-
-        // 2. Query OpenLibrary if ISBN is available and external lookup is permitted
-        if (allowExternalLookup && externalLookupEnabled && detectedIsbn != null) {
-            Optional<EnrichedMetadata> isbnMeta = lookupByIsbn(detectedIsbn);
-            if (isbnMeta.isPresent()) {
-                applyMetadataToDocument(doc, isbnMeta.get());
-                if (doc.getPublicationYear() == null) {
-                    extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
-                            .ifPresent(doc::setPublicationYear);
-                }
-                return true;
             }
         }
 
@@ -442,258 +427,55 @@ public class MetadataEnrichmentService {
     }
 
     /**
-     * Queries CrossRef and Semantic Scholar for a given DOI.
+     * Queries registered MetadataProviders for a given DOI.
      */
     public Optional<EnrichedMetadata> lookupByDoi(String doi) {
-        Optional<EnrichedMetadata> crossRefOpt = fetchFromCrossRef(doi);
-        if (crossRefOpt.isPresent()) {
-            EnrichedMetadata cr = crossRefOpt.get();
-            // If CrossRef lacks an abstract, try supplementing the abstract from Semantic Scholar
-            if (cr.abstractText() == null || cr.abstractText().isBlank()) {
-                Optional<EnrichedMetadata> s2Opt = fetchFromSemanticScholar(doi);
-                if (s2Opt.isPresent() && s2Opt.get().abstractText() != null && !s2Opt.get().abstractText().isBlank()) {
-                    return Optional.of(new EnrichedMetadata(
-                            cr.doi(),
-                            cr.isbn(),
-                            cr.title() != null ? cr.title() : s2Opt.get().title(),
-                            cr.authors() != null ? cr.authors() : s2Opt.get().authors(),
-                            cr.publicationYear() != null ? cr.publicationYear() : s2Opt.get().publicationYear(),
-                            s2Opt.get().abstractText(),
-                            "CROSSREF+SEMANTIC_SCHOLAR"
-                    ));
+        if (doi == null || doi.isBlank()) return Optional.empty();
+        MetadataQuery query = MetadataQuery.of(doi, null);
+        for (MetadataProvider provider : providers) {
+            if (provider.supports(query)) {
+                Optional<EnrichedMetadata> res = provider.lookup(query);
+                if (res.isPresent()) {
+                    return res;
                 }
-            }
-            return crossRefOpt;
-        }
-        return fetchFromSemanticScholar(doi);
-    }
-
-    public Optional<EnrichedMetadata> fetchFromCrossRef(String doi) {
-        try {
-            String encodedDoi = URLEncoder.encode(doi, StandardCharsets.UTF_8);
-            URI uri = URI.create("https://api.crossref.org/works/" + encodedDoi);
-            HttpRequest req = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() != 200 || res.body() == null) {
-                return Optional.empty();
-            }
-            return parseCrossRefJson(doi, res.body());
-        } catch (Exception e) {
-            log.debug("CrossRef lookup failed for DOI {}: {}", doi, e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    public Optional<EnrichedMetadata> parseCrossRefJson(String doi, String jsonBody) {
-        try {
-            JsonNode root = objectMapper.readTree(jsonBody);
-            JsonNode msg = root.path("message");
-            if (msg.isMissingNode() || msg.isNull()) {
-                return Optional.empty();
-            }
-
-            String title = null;
-            JsonNode titleArr = msg.path("title");
-            if (titleArr.isArray() && !titleArr.isEmpty()) {
-                title = cleanXmlTags(titleArr.get(0).asText(null));
-            }
-
-            List<String> authorNames = new ArrayList<>();
-            JsonNode authorArr = msg.path("author");
-            if (authorArr.isArray()) {
-                for (JsonNode a : authorArr) {
-                    String given = a.path("given").asText("").strip();
-                    String family = a.path("family").asText("").strip();
-                    String full = (given + " " + family).strip();
-                    if (!full.isEmpty()) {
-                        authorNames.add(full);
-                    } else if (a.hasNonNull("name")) {
-                        authorNames.add(a.path("name").asText().strip());
-                    }
-                }
-            }
-            String authors = authorNames.isEmpty() ? null : String.join(", ", authorNames);
-
-            Integer year = extractCrossRefYear(msg.path("published-print"))
-                    .or(() -> extractCrossRefYear(msg.path("published-online")))
-                    .or(() -> extractCrossRefYear(msg.path("issued")))
-                    .orElse(null);
-
-            String abstractText = msg.hasNonNull("abstract")
-                    ? cleanXmlTags(msg.path("abstract").asText())
-                    : null;
-
-            if (title == null && authors == null && abstractText == null) {
-                return Optional.empty();
-            }
-
-            return Optional.of(new EnrichedMetadata(doi, null, title, authors, year, abstractText, "CROSSREF"));
-        } catch (Exception e) {
-            log.debug("Failed to parse CrossRef JSON for {}: {}", doi, e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    private Optional<Integer> extractCrossRefYear(JsonNode dateNode) {
-        if (dateNode == null || dateNode.isMissingNode()) return Optional.empty();
-        JsonNode parts = dateNode.path("date-parts");
-        if (parts.isArray() && !parts.isEmpty() && parts.get(0).isArray() && !parts.get(0).isEmpty()) {
-            int y = parts.get(0).get(0).asInt(0);
-            if (y >= 1800 && y <= 2100) {
-                return Optional.of(y);
             }
         }
         return Optional.empty();
     }
 
-    public Optional<EnrichedMetadata> fetchFromSemanticScholar(String doi) {
-        try {
-            String encodedDoi = URLEncoder.encode(doi, StandardCharsets.UTF_8);
-            URI uri = URI.create("https://api.semanticscholar.org/graph/v1/paper/DOI:" + encodedDoi + "?fields=title,authors,year,abstract");
-            HttpRequest req = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() != 200 || res.body() == null) {
-                return Optional.empty();
-            }
-            return parseSemanticScholarJson(doi, res.body());
-        } catch (Exception e) {
-            log.debug("Semantic Scholar lookup failed for DOI {}: {}", doi, e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    public Optional<EnrichedMetadata> parseSemanticScholarJson(String doi, String jsonBody) {
-        try {
-            JsonNode root = objectMapper.readTree(jsonBody);
-            String title = root.hasNonNull("title") ? root.path("title").asText().strip() : null;
-
-            List<String> authorNames = new ArrayList<>();
-            JsonNode authorsNode = root.path("authors");
-            if (authorsNode.isArray()) {
-                for (JsonNode a : authorsNode) {
-                    String name = a.path("name").asText("").strip();
-                    if (!name.isEmpty()) {
-                        authorNames.add(name);
-                    }
-                }
-            }
-            String authors = authorNames.isEmpty() ? null : String.join(", ", authorNames);
-
-            Integer year = root.hasNonNull("year") && root.path("year").asInt(0) >= 1800
-                    ? root.path("year").asInt()
-                    : null;
-
-            String abstractText = root.hasNonNull("abstract")
-                    ? root.path("abstract").asText().strip()
-                    : null;
-
-            if (title == null && authors == null && abstractText == null) {
-                return Optional.empty();
-            }
-
-            return Optional.of(new EnrichedMetadata(doi, null, title, authors, year, abstractText, "SEMANTIC_SCHOLAR"));
-        } catch (Exception e) {
-            log.debug("Failed to parse Semantic Scholar JSON for {}: {}", doi, e.getMessage());
-            return Optional.empty();
-        }
-    }
-
     /**
-     * Queries OpenLibrary Books API for a given ISBN-10 or ISBN-13.
+     * Queries registered MetadataProviders for a given ISBN.
      */
     public Optional<EnrichedMetadata> lookupByIsbn(String isbn) {
-        try {
-            String key = "ISBN:" + isbn;
-            URI uri = URI.create("https://openlibrary.org/api/books?bibkeys=" + URLEncoder.encode(key, StandardCharsets.UTF_8) + "&format=json&jscmd=data");
-            HttpRequest req = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() != 200 || res.body() == null) {
-                return Optional.empty();
+        if (isbn == null || isbn.isBlank()) return Optional.empty();
+        MetadataQuery query = MetadataQuery.of(null, isbn);
+        for (MetadataProvider provider : providers) {
+            if (provider.supports(query)) {
+                Optional<EnrichedMetadata> res = provider.lookup(query);
+                if (res.isPresent()) {
+                    return res;
+                }
             }
-            return parseOpenLibraryJson(isbn, res.body());
-        } catch (Exception e) {
-            log.debug("OpenLibrary lookup failed for ISBN {}: {}", isbn, e.getMessage());
-            return Optional.empty();
         }
+        return Optional.empty();
+    }
+
+    public Optional<EnrichedMetadata> parseCrossRefJson(String doi, String jsonBody) {
+        for (MetadataProvider p : providers) {
+            if (p instanceof com.pdforever.service.metadata.provider.CrossRefMetadataProvider cr) {
+                return cr.parseCrossRefJson(doi, jsonBody);
+            }
+        }
+        return new com.pdforever.service.metadata.provider.CrossRefMetadataProvider(objectMapper, null, null).parseCrossRefJson(doi, jsonBody);
     }
 
     public Optional<EnrichedMetadata> parseOpenLibraryJson(String isbn, String jsonBody) {
-        try {
-            JsonNode root = objectMapper.readTree(jsonBody);
-            JsonNode book = root.path("ISBN:" + isbn);
-            if (book.isMissingNode() || book.isNull() || book.isEmpty()) {
-                return Optional.empty();
+        for (MetadataProvider p : providers) {
+            if (p instanceof com.pdforever.service.metadata.provider.OpenLibraryMetadataProvider ol) {
+                return ol.parseOpenLibraryJson(isbn, jsonBody);
             }
-
-            String title = book.hasNonNull("title") ? book.path("title").asText().strip() : null;
-            if (title != null && book.hasNonNull("subtitle")) {
-                String sub = book.path("subtitle").asText().strip();
-                if (!sub.isEmpty()) {
-                    title = title + " — " + sub;
-                }
-            }
-
-            List<String> authorNames = new ArrayList<>();
-            JsonNode authorsNode = book.path("authors");
-            if (authorsNode.isArray()) {
-                for (JsonNode a : authorsNode) {
-                    String name = a.path("name").asText("").strip();
-                    if (!name.isEmpty()) {
-                        authorNames.add(name);
-                    }
-                }
-            }
-            String authors = authorNames.isEmpty() ? null : String.join(", ", authorNames);
-
-            Integer year = null;
-            if (book.hasNonNull("publish_date")) {
-                Matcher ym = YEAR_PATTERN.matcher(book.path("publish_date").asText(""));
-                if (ym.find()) {
-                    year = Integer.parseInt(ym.group(1));
-                }
-            }
-
-            String abstractText = null;
-            if (book.hasNonNull("notes")) {
-                JsonNode notesNode = book.path("notes");
-                abstractText = notesNode.isObject() ? notesNode.path("value").asText(null) : notesNode.asText(null);
-            } else if (book.path("excerpts").isArray() && !book.path("excerpts").isEmpty()) {
-                abstractText = book.path("excerpts").get(0).path("text").asText(null);
-            }
-
-            if (title == null && authors == null) {
-                return Optional.empty();
-            }
-
-            return Optional.of(new EnrichedMetadata(null, isbn, title, authors, year, abstractText, "OPENLIBRARY"));
-        } catch (Exception e) {
-            log.debug("Failed to parse OpenLibrary JSON for ISBN {}: {}", isbn, e.getMessage());
-            return Optional.empty();
         }
-    }
-
-    private String cleanXmlTags(String input) {
-        if (input == null) return null;
-        String stripped = input.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").strip();
-        return stripped.isEmpty() ? null : stripped;
+        return new com.pdforever.service.metadata.provider.OpenLibraryMetadataProvider(objectMapper, null).parseOpenLibraryJson(isbn, jsonBody);
     }
 
     private List<String> extractFirstPagesText(Path pdfPath, int maxPages) {
