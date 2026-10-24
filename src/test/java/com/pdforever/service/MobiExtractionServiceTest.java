@@ -114,6 +114,44 @@ class MobiExtractionServiceTest {
         assertThat(firstChapterHtml).doesNotContain("yl-In:\">");
     }
 
+    @Test
+    void testRealAzw3FileIfPresent() throws IOException {
+        Path realPath = Path.of("storage/books/novels/Apfelkuchen am Meer Roman -- Barns, Anne -- Köln, 2017.azw3");
+        if (!Files.exists(realPath)) {
+            return;
+        }
+
+        MobiExtractionService.ExtractedMobiData data = service.extractMobiData(realPath);
+        assertThat(data.valid()).isTrue();
+        assertThat(data.title()).contains("Apfelkuchen am Meer");
+        assertThat(data.authors()).contains("Barns");
+
+        // The book has 37 chapters/sections and must now be cleanly split into chapters, not 1 giant chunk
+        assertThat(data.chapterCount()).isGreaterThanOrEqualTo(30);
+        System.out.println("AZW3 extracted chapters count: " + data.chapterCount());
+
+        List<TocItemDto> outline = service.extractOutline(realPath);
+        assertThat(outline.size()).isEqualTo(data.chapterCount());
+        assertThat(outline.get(0).title()).isNotBlank();
+        System.out.println("TOC Chapter 1: " + outline.get(0).title());
+        System.out.println("TOC Chapter 5: " + outline.get(4).title());
+        System.out.println("TOC Chapter 33: " + outline.get(32).title());
+
+        assertThat(outline.stream().anyMatch(t -> t.title().contains("1. Kapitel"))).isTrue();
+        assertThat(outline.stream().anyMatch(t -> t.title().contains("29. Kapitel"))).isTrue();
+        assertThat(outline.stream().anyMatch(t -> t.title().contains("Apfelbutter"))).isTrue();
+
+        // Verify that no chapter contains an unbalanced giant chunk of 500k+
+        for (String chText : data.chapterTexts()) {
+            assertThat(chText.length()).isLessThan(100_000);
+        }
+
+        // Test chapter 5 (which is '1. Kapitel') HTML retrieval
+        String ch5Html = service.getChapterHtml(realPath, 5, UUID.randomUUID());
+        assertThat(ch5Html).contains("1. Kapitel");
+        assertThat(ch5Html).contains("Merle");
+    }
+
     private Path createSampleMobi(Path target) throws IOException {
         // Generate a sample JPEG image for cover
         BufferedImage coverImage = new BufferedImage(500, 750, BufferedImage.TYPE_INT_RGB);

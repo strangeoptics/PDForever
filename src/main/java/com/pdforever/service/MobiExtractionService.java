@@ -34,6 +34,9 @@ public class MobiExtractionService {
             "(?i)<a\\s+[^>]*?(?:filepos=[\"']?|href=[\"']?#filepos)(\\d+)[\"']?[^>]*>(.*?)</a>",
             Pattern.DOTALL
     );
+    private static final Pattern KF8_DOC_PATTERN = Pattern.compile("(?i)(?:<\\?xml[^>]*>\\s*)?<html[\\s>]");
+    private static final Pattern TITLE_TAG_PATTERN = Pattern.compile("(?i)<title[^>]*>(.*?)</title>");
+    private static final Pattern HEADING_CANDIDATE_PATTERN = Pattern.compile("(?i)<(?:h[1-4]|p[^>]+class=[\"'][^\"']*(?:head|chapter|titel|title)[^\"']*[\"'])[^>]*>(.*?)</(?:h[1-4]|p)>");
 
     public record MobiChapter(String title, String html) {
     }
@@ -362,13 +365,19 @@ public class MobiExtractionService {
             return Collections.emptyList();
         }
 
-        // 1. Try splitting using internal MOBI Table of Contents (filepos references)
+        // 1. Try splitting KF8 (AZW3 / MOBI8) concatenated XHTML documents
+        List<MobiChapter> kf8Chapters = splitByKf8Documents(fullTextHtml);
+        if (kf8Chapters.size() >= 2) {
+            return kf8Chapters;
+        }
+
+        // 2. Try splitting using internal MOBI Table of Contents (filepos references)
         List<MobiChapter> fileposChapters = splitByFileposToc(fullTextHtml);
         if (fileposChapters.size() >= 3) {
             return fileposChapters;
         }
 
-        // 2. Try splitting by <mbp:pagebreak> if it produces balanced chunks
+        // 3. Try splitting by <mbp:pagebreak> if it produces balanced chunks
         if (PAGEBREAK_PATTERN.matcher(fullTextHtml).find()) {
             String[] parts = PAGEBREAK_PATTERN.split(fullTextHtml);
             List<String> list = new ArrayList<>();
@@ -380,7 +389,7 @@ public class MobiExtractionService {
                 }
             }
             // Only accept pagebreak split if it doesn't leave a single giant un-split block
-            if (list.size() > 1 && (list.size() >= 4 || maxPartLen < 150_000)) {
+            if (list.size() > 1 && maxPartLen < 150_000 && maxPartLen < fullTextHtml.length() * 0.7) {
                 List<MobiChapter> chapters = new ArrayList<>();
                 for (int i = 0; i < list.size(); i++) {
                     int num = i + 1;
@@ -428,6 +437,82 @@ public class MobiExtractionService {
         }
 
         return List.of(new MobiChapter("Buchinhalt", fullTextHtml.strip()));
+    }
+
+    private List<MobiChapter> splitByKf8Documents(String fullTextHtml) {
+        if (fullTextHtml == null || fullTextHtml.length() < 100) {
+            return Collections.emptyList();
+        }
+
+        Matcher dsm = KF8_DOC_PATTERN.matcher(fullTextHtml);
+        List<Integer> docOffsets = new ArrayList<>();
+        while (dsm.find()) {
+            docOffsets.add(dsm.start());
+        }
+
+        if (docOffsets.size() < 2) {
+            return Collections.emptyList();
+        }
+
+        List<MobiChapter> chapters = new ArrayList<>();
+        for (int i = 0; i < docOffsets.size(); i++) {
+            int start = docOffsets.get(i);
+            int end = (i + 1 < docOffsets.size()) ? docOffsets.get(i + 1) : fullTextHtml.length();
+            if (start >= end) continue;
+
+            String docHtml = fullTextHtml.substring(start, end).strip();
+            if (docHtml.isBlank()) continue;
+
+            String title = null;
+            Matcher titleMatcher = TITLE_TAG_PATTERN.matcher(docHtml);
+            if (titleMatcher.find()) {
+                String candidate = stripHtml(titleMatcher.group(1)).trim();
+                if (!candidate.isBlank()) {
+                    title = candidate;
+                }
+            }
+            if (title == null || "Titel".equalsIgnoreCase(title)) {
+                Matcher hm = HEADING_CANDIDATE_PATTERN.matcher(docHtml);
+                if (hm.find()) {
+                    String candidate = stripHtml(hm.group(1)).trim();
+                    if (!candidate.isBlank() && candidate.length() <= 100) {
+                        title = candidate;
+                    }
+                }
+            }
+
+            if ("Titel".equalsIgnoreCase(title)) {
+                title = "Titelseite";
+            }
+            if (title == null || title.isBlank()) {
+                title = "Abschnitt " + (chapters.size() + 1);
+            }
+
+            // If consecutive slice has the exact same title, merge with previous chapter
+            if (!chapters.isEmpty() && chapters.get(chapters.size() - 1).title().equalsIgnoreCase(title)) {
+                int lastIdx = chapters.size() - 1;
+                MobiChapter prev = chapters.get(lastIdx);
+                chapters.set(lastIdx, new MobiChapter(prev.title(), prev.html() + "\n" + docHtml));
+            } else {
+                chapters.add(new MobiChapter(title, docHtml));
+            }
+        }
+
+        // If merging collapsed everything to 1 chapter (e.g. all slices had identical generic title),
+        // re-split without merging to prevent a single giant block
+        if (chapters.size() < 2 && docOffsets.size() >= 2) {
+            chapters.clear();
+            for (int i = 0; i < docOffsets.size(); i++) {
+                int start = docOffsets.get(i);
+                int end = (i + 1 < docOffsets.size()) ? docOffsets.get(i + 1) : fullTextHtml.length();
+                if (start >= end) continue;
+                String docHtml = fullTextHtml.substring(start, end).strip();
+                if (docHtml.isBlank()) continue;
+                chapters.add(new MobiChapter("Teil " + (chapters.size() + 1), docHtml));
+            }
+        }
+
+        return chapters;
     }
 
     private List<MobiChapter> splitByFileposToc(String fullTextHtml) {
@@ -525,7 +610,7 @@ public class MobiExtractionService {
         return null;
     }
 
-    private String decompressText(PdbFile pdb, MobiHeader header) {
+    String decompressText(PdbFile pdb, MobiHeader header) {
         ByteArrayOutputStream fullStream = new ByteArrayOutputStream();
         int textRecordCount = Math.min(header.textRecordCount, pdb.getNumRecords() - 1);
 
@@ -644,7 +729,7 @@ public class MobiExtractionService {
         return Arrays.copyOf(buffer, outLen);
     }
 
-    private MobiHeader parseMobiHeader(PdbFile pdb) {
+    MobiHeader parseMobiHeader(PdbFile pdb) {
         byte[] rec0 = pdb.getRecord(0);
         if (rec0 == null || rec0.length < 16) return null;
 
@@ -663,6 +748,9 @@ public class MobiExtractionService {
         }
 
         int mobiHeaderLength = readInt32BE(rec0, 20);
+        if (rec0.length >= 40) {
+            header.formatVersion = readInt32BE(rec0, 36);
+        }
         header.textEncoding = (rec0.length >= 32) ? readInt32BE(rec0, 28) : 1252;
         Charset charset = (header.textEncoding == 65001) ? StandardCharsets.UTF_8 : Charset.forName("windows-1252");
 
@@ -746,7 +834,8 @@ public class MobiExtractionService {
                 | (b[offset + 3] & 0xFF);
     }
 
-    private static class MobiHeader {
+    static class MobiHeader {
+        int formatVersion;
         int compression;
         int textLength;
         int textRecordCount;
