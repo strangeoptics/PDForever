@@ -48,6 +48,8 @@ interface PdfViewerProps {
     boundingBox: BoundingBox;
   }) => void;
   onSelectNote: (note: ReadingNote) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 export const PdfViewer: React.FC<PdfViewerProps> = ({
@@ -67,6 +69,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   onPageChange,
   onRequestCreateNote,
   onSelectNote,
+  isFullscreen,
+  onToggleFullscreen,
 }) => {
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [defaultPageSize, setDefaultPageSize] = useState<{ width: number; height: number }>({
@@ -495,6 +499,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         onCloseSecondaryPane={onCloseSecondaryPane}
         inspectorOpen={inspectorOpen}
         onToggleInspector={onToggleInspector}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={onToggleFullscreen}
       />
 
       {/* Floating Selection Menu: Add Reading Note from selected text */}

@@ -15,6 +15,8 @@ import {
   CircleDashed,
   X,
   FileText,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { DocumentItem, ReaderViewMode, ReadingStatus } from '../types';
 
@@ -45,6 +47,8 @@ export interface PdfViewerToolbarProps {
   onCloseSecondaryPane?: () => void;
   inspectorOpen: boolean;
   onToggleInspector?: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 export const PdfViewerToolbar: React.FC<PdfViewerToolbarProps> = ({
@@ -74,6 +78,8 @@ export const PdfViewerToolbar: React.FC<PdfViewerToolbarProps> = ({
   onCloseSecondaryPane,
   inspectorOpen,
   onToggleInspector,
+  isFullscreen,
+  onToggleFullscreen,
 }) => {
   return (
     <div className="flex flex-col bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-xs z-20">
@@ -298,6 +304,20 @@ export const PdfViewerToolbar: React.FC<PdfViewerToolbarProps> = ({
                 <PanelRightClose className="w-4 h-4" />
               ) : (
                 <PanelRightOpen className="w-4 h-4" />
+              )}
+            </button>
+          )}
+
+          {onToggleFullscreen && (
+            <button
+              onClick={onToggleFullscreen}
+              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+              title={isFullscreen ? 'Vollbildmodus beenden (F)' : 'Vollbildmodus aktivieren (F)'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-4 h-4 text-blue-500" />
+              ) : (
+                <Maximize2 className="w-4 h-4" />
               )}
             </button>
           )}

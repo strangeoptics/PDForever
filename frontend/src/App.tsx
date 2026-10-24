@@ -10,6 +10,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Loader2,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { api } from './api';
 import {
@@ -29,6 +31,7 @@ import {
 import { LeftSidebar } from './components/LeftSidebar';
 import { useSidebarResize } from './hooks/useSidebarResize';
 import { useDocumentFilters } from './hooks/useDocumentFilters';
+import { useFullscreen } from './hooks/useFullscreen';
 import { VirtualizedDocumentGrid } from './components/VirtualizedDocumentGrid';
 import { FacetedFilterBar } from './components/FacetedFilterBar';
 import { InstantSearchBar } from './components/InstantSearchBar';
@@ -74,6 +77,7 @@ function loadInitialDarkMode(): boolean {
 }
 
 export const App: React.FC = () => {
+  const { isFullscreen, toggleFullscreen } = useFullscreen();
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialDarkMode);
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
@@ -568,6 +572,18 @@ export const App: React.FC = () => {
           </button>
 
           <button
+            onClick={toggleFullscreen}
+            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+            title={isFullscreen ? "Vollbildmodus beenden (F)" : "Vollbildmodus aktivieren (F)"}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4 text-blue-500" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
+          </button>
+
+          <button
             onClick={() => setSettingsOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition"
             title="Einstellungen öffnen"
@@ -689,6 +705,8 @@ export const App: React.FC = () => {
                 setNoteModalOpen(true);
               }}
               onDeleteNote={handleDeleteNote}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={toggleFullscreen}
             />
           ) : (
             /* Document Explorer Grid/List View */
