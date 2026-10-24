@@ -257,8 +257,17 @@ public class Document {
 
     public String getFormat() {
         if (format == null) {
-            if (fileName != null && fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".epub")) {
-                return "EPUB";
+            if (fileName != null) {
+                String lower = fileName.toLowerCase(java.util.Locale.ROOT);
+                if (lower.endsWith(".epub")) return "EPUB";
+                if (lower.endsWith(".mobi")) return "MOBI";
+                if (lower.endsWith(".azw") || lower.endsWith(".azw3")) return "AZW";
+            }
+            if (relativePath != null) {
+                String lower = relativePath.toLowerCase(java.util.Locale.ROOT);
+                if (lower.endsWith(".epub")) return "EPUB";
+                if (lower.endsWith(".mobi")) return "MOBI";
+                if (lower.endsWith(".azw") || lower.endsWith(".azw3")) return "AZW";
             }
             return "PDF";
         }

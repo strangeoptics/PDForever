@@ -41,8 +41,9 @@ public interface DocumentRepository extends JpaRepository<Document, UUID>, JpaSp
                 COALESCE(MAX(d.pageCount), 0),
                 MIN(d.publicationYear),
                 MAX(d.publicationYear),
-                SUM(CASE WHEN (d.format IS NULL OR UPPER(d.format) = 'PDF') AND LOWER(d.relativePath) NOT LIKE '%.epub' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN UPPER(COALESCE(d.format, '')) = 'EPUB' OR LOWER(d.relativePath) LIKE '%.epub' THEN 1 ELSE 0 END)
+                SUM(CASE WHEN (d.format IS NULL OR UPPER(d.format) = 'PDF') AND LOWER(d.relativePath) NOT LIKE '%.epub' AND LOWER(d.relativePath) NOT LIKE '%.mobi' AND LOWER(d.relativePath) NOT LIKE '%.azw%' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN UPPER(COALESCE(d.format, '')) = 'EPUB' OR LOWER(d.relativePath) LIKE '%.epub' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN UPPER(COALESCE(d.format, '')) IN ('MOBI', 'AZW', 'AZW3') OR LOWER(d.relativePath) LIKE '%.mobi' OR LOWER(d.relativePath) LIKE '%.azw%' THEN 1 ELSE 0 END)
             FROM Document d
             WHERE d.isDeleted = false
               AND (:pathPrefix IS NULL OR :pathPrefix = '' OR d.relativePath = :pathPrefix OR d.relativePath LIKE CONCAT(:pathPrefix, '/%'))

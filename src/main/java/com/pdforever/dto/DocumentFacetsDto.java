@@ -19,6 +19,7 @@ public record DocumentFacetsDto(
         Integer maxPublicationYear,
         int pdfCount,
         int epubCount,
+        int mobiCount,
         List<TagFacetDto> tags
 ) {
     public DocumentFacetsDto(
@@ -43,7 +44,7 @@ public record DocumentFacetsDto(
                 withNotesCount, totalNotesCount, withMetadataCount,
                 shortDocsCount, mediumDocsCount, longDocsCount,
                 minPageCount, maxPageCount, minPublicationYear, maxPublicationYear,
-                0, 0, tags
+                0, 0, 0, tags
         );
     }
 

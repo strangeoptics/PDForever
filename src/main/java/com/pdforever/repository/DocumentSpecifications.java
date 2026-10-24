@@ -38,18 +38,35 @@ public final class DocumentSpecifications {
                 predicates.add(cb.equal(cb.upper(statusExpr), normStatus));
             }
 
-            // 3b. format (PDF, EPUB, EBOOK)
+            // 3b. format (PDF, EPUB, MOBI, AZW, EBOOK)
             if (c.format() != null && !c.format().isBlank()) {
                 String reqFormat = c.format().strip().toUpperCase(Locale.ROOT);
                 if ("EPUB".equals(reqFormat)) {
                     Predicate formatIsEpub = cb.equal(cb.upper(root.get("format")), "EPUB");
                     Predicate pathIsEpub = cb.like(cb.lower(root.get("relativePath")), "%.epub");
                     predicates.add(cb.or(formatIsEpub, pathIsEpub));
+                } else if ("MOBI".equals(reqFormat) || "MOBI_AZW".equals(reqFormat)) {
+                    Predicate formatIsMobi = cb.upper(root.get("format")).in("MOBI", "AZW", "AZW3");
+                    Predicate pathIsMobi = cb.or(
+                            cb.like(cb.lower(root.get("relativePath")), "%.mobi"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw3")
+                    );
+                    predicates.add(cb.or(formatIsMobi, pathIsMobi));
+                } else if ("AZW".equals(reqFormat) || "AZW3".equals(reqFormat)) {
+                    Predicate formatIsAzw = cb.upper(root.get("format")).in("AZW", "AZW3");
+                    Predicate pathIsAzw = cb.or(
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw3")
+                    );
+                    predicates.add(cb.or(formatIsAzw, pathIsAzw));
                 } else if ("PDF".equals(reqFormat)) {
                     Predicate formatIsPdf = cb.equal(cb.upper(root.get("format")), "PDF");
                     Predicate formatNull = cb.isNull(root.get("format"));
                     Predicate notEpub = cb.notLike(cb.lower(root.get("relativePath")), "%.epub");
-                    predicates.add(cb.and(cb.or(formatIsPdf, formatNull), notEpub));
+                    Predicate notMobi = cb.notLike(cb.lower(root.get("relativePath")), "%.mobi");
+                    Predicate notAzw = cb.notLike(cb.lower(root.get("relativePath")), "%.azw%");
+                    predicates.add(cb.and(cb.or(formatIsPdf, formatNull), notEpub, notMobi, notAzw));
                 } else if ("EBOOK".equals(reqFormat) || "EBOOKS".equals(reqFormat)) {
                     Predicate formatEbook = cb.upper(root.get("format")).in("EPUB", "MOBI", "AZW", "AZW3");
                     Predicate pathEbook = cb.or(

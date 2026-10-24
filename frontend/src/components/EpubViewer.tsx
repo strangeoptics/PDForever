@@ -533,9 +533,19 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
       <div className="flex-none flex items-center justify-between px-3 py-2 border-b border-slate-700/60 bg-slate-800/90 backdrop-blur-sm z-20 text-xs gap-2">
         {/* Left: Badge, Title & Chapter Info */}
         <div className="flex items-center gap-2 min-w-0">
-          <span className="flex-none px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
-            EPUB
-          </span>
+          {(() => {
+            const fmt = (docItem.format || (docItem.fileName.toLowerCase().endsWith('.mobi') ? 'MOBI' : docItem.fileName.toLowerCase().endsWith('.azw') || docItem.fileName.toLowerCase().endsWith('.azw3') ? 'AZW' : 'EPUB')).toUpperCase();
+            const badgeClasses = fmt === 'MOBI'
+              ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+              : fmt === 'AZW' || fmt === 'AZW3'
+              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+              : 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+            return (
+              <span className={`flex-none px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase border ${badgeClasses}`}>
+                {fmt}
+              </span>
+            );
+          })()}
           <span className="truncate font-medium text-slate-200 max-w-[200px] sm:max-w-[280px]" title={docItem.fileName}>
             {formatDocTitle(docItem)}
           </span>

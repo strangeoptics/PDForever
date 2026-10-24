@@ -130,7 +130,15 @@ export const InstantSearchBar: React.FC<InstantSearchBarProps> = React.memo(({
             </div>
           ) : (
             searchResults.map((group) => {
-              const isEpub = group.format === 'EPUB' || group.relPath.toLowerCase().endsWith('.epub');
+              const fmt = (group.format || (group.relPath.toLowerCase().endsWith('.mobi') ? 'MOBI' : group.relPath.toLowerCase().endsWith('.azw') || group.relPath.toLowerCase().endsWith('.azw3') ? 'AZW' : group.relPath.toLowerCase().endsWith('.epub') ? 'EPUB' : 'PDF')).toUpperCase();
+              const isEbook = fmt !== 'PDF';
+              const badgeClasses = fmt === 'MOBI'
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                : fmt === 'AZW' || fmt === 'AZW3'
+                ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
+                : fmt === 'EPUB'
+                ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30'
+                : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20';
               return (
                 <div key={group.docId} className="p-3.5 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -138,13 +146,9 @@ export const InstantSearchBar: React.FC<InstantSearchBarProps> = React.memo(({
                       onClick={() => handleSelectResult(group.docId, group.matches[0]?.pageNumber || 1)}
                       className="font-semibold text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 text-left min-w-0"
                     >
-                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 ${
-                        isEpub
-                          ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30'
-                          : 'bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20'
-                      }`}>
-                        {isEpub ? <BookOpen className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
-                        {isEpub ? 'EPUB' : 'PDF'}
+                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 border ${badgeClasses}`}>
+                        {isEbook ? <BookOpen className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
+                        {fmt}
                       </span>
                       <span className="truncate">{group.title}</span>
                     </button>
@@ -161,7 +165,7 @@ export const InstantSearchBar: React.FC<InstantSearchBarProps> = React.memo(({
                         className="w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition flex items-start gap-2.5 group"
                       >
                         <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[11px] font-medium">
-                          {isEpub ? `Kap. ${m.pageNumber}` : `p. ${m.pageNumber}`}
+                          {isEbook ? `Kap. ${m.pageNumber}` : `p. ${m.pageNumber}`}
                         </span>
                         <p
                           className="search-snippet text-xs text-slate-700 dark:text-slate-300 line-clamp-2 leading-relaxed"

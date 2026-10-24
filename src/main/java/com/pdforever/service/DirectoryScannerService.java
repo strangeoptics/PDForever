@@ -31,6 +31,7 @@ public class DirectoryScannerService {
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
     private final EpubExtractionService epubExtractionService;
+    private final MobiExtractionService mobiExtractionService;
     private final LuceneIndexService luceneIndexService;
     private final FileNameCleaner fileNameCleaner;
     private final MetadataEnrichmentService metadataEnrichmentService;
@@ -43,6 +44,7 @@ public class DirectoryScannerService {
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
             EpubExtractionService epubExtractionService,
+            MobiExtractionService mobiExtractionService,
             LuceneIndexService luceneIndexService,
             FileNameCleaner fileNameCleaner,
             MetadataEnrichmentService metadataEnrichmentService,
@@ -54,6 +56,7 @@ public class DirectoryScannerService {
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
         this.epubExtractionService = epubExtractionService;
+        this.mobiExtractionService = mobiExtractionService;
         this.luceneIndexService = luceneIndexService;
         this.fileNameCleaner = fileNameCleaner;
         this.metadataEnrichmentService = metadataEnrichmentService;
@@ -82,6 +85,10 @@ public class DirectoryScannerService {
      * while purging them from the Lucene index.
      */
     public synchronized ReconciliationReport reconcileLibrary() {
+        return reconcileLibrary(false);
+    }
+
+    public synchronized ReconciliationReport reconcileLibrary(boolean force) {
         Path root = getRootPath();
         try {
             Files.createDirectories(root);
@@ -90,7 +97,7 @@ public class DirectoryScannerService {
             return new ReconciliationReport(0, 0, 0);
         }
 
-        log.info("Starting library reconciliation in {}", root);
+        log.info("Starting library reconciliation in {} (force={})", root, force);
         Map<String, Path> discoveredPdfs = new LinkedHashMap<>();
 
         try (Stream<Path> walk = Files.walk(root)) {
@@ -109,7 +116,7 @@ public class DirectoryScannerService {
 
         try {
             for (Map.Entry<String, Path> entry : discoveredPdfs.entrySet()) {
-                IngestionOutcome outcome = ingestOrUpdateFile(entry.getValue(), false);
+                IngestionOutcome outcome = ingestOrUpdateFile(entry.getValue(), false, force);
                 if (outcome == IngestionOutcome.ADDED) {
                     added++;
                     uncommittedCount++;
@@ -178,10 +185,14 @@ public class DirectoryScannerService {
     }
 
     public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath) {
-        return ingestOrUpdateFile(filePath, true);
+        return ingestOrUpdateFile(filePath, true, false);
     }
 
     public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath, boolean commitImmediately) {
+        return ingestOrUpdateFile(filePath, commitImmediately, false);
+    }
+
+    public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath, boolean commitImmediately, boolean force) {
         if (!Files.exists(filePath) || !Files.isRegularFile(filePath) || !isSupportedDocument(filePath)) {
             return IngestionOutcome.SKIPPED_ERROR;
         }
@@ -204,7 +215,7 @@ public class DirectoryScannerService {
                 boolean nameChanged = !Objects.equals(existing.getFileName(), fileName);
                 boolean titleIsJunk = existing.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(existing.getMetaTitle());
 
-                if (!existing.isDeleted() && !timestampChanged && !sizeChanged) {
+                if (!force && !existing.isDeleted() && !timestampChanged && !sizeChanged) {
                     if (nameChanged || titleIsJunk) {
                         existing.setFileName(fileName);
                         if (titleIsJunk) {
@@ -256,6 +267,32 @@ public class DirectoryScannerService {
                         metadataEnrichmentService.extractDoi(epubData.identifier()).ifPresent(targetDoc::setDoi);
                     }
                     targetDoc.setMetadataSource("EPUB_METADATA");
+                } else if (isMobiOrAzwFile(filePath)) {
+                    MobiExtractionService.ExtractedMobiData mobiData = mobiExtractionService.extractMobiData(filePath);
+                    if (!mobiData.valid()) {
+                        log.warn("Skipping corrupt modified MOBI/AZW: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = mobiData.chapterCount();
+                    pageTexts = mobiData.chapterTexts();
+                    String lowerName = filePath.getFileName().toString().toLowerCase(Locale.ROOT);
+                    targetDoc.setFormat(lowerName.endsWith(".azw") || lowerName.endsWith(".azw3") ? "AZW" : "MOBI");
+                    if (mobiData.title() != null && !mobiData.title().isBlank()) {
+                        targetDoc.setMetaTitle(mobiData.title());
+                    }
+                    if (mobiData.authors() != null && !mobiData.authors().isBlank()) {
+                        targetDoc.setAuthors(mobiData.authors());
+                    }
+                    if (mobiData.publicationYear() != null) {
+                        targetDoc.setPublicationYear(mobiData.publicationYear());
+                    }
+                    if (mobiData.description() != null && !mobiData.description().isBlank()) {
+                        targetDoc.setAbstractText(mobiData.description());
+                    }
+                    if (mobiData.identifier() != null && !mobiData.identifier().isBlank()) {
+                        metadataEnrichmentService.extractIsbn(mobiData.identifier()).ifPresent(targetDoc::setIsbn);
+                    }
+                    targetDoc.setMetadataSource("MOBI_METADATA");
                 } else {
                     PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
                     if (!extracted.valid()) {
@@ -315,6 +352,32 @@ public class DirectoryScannerService {
                         metadataEnrichmentService.extractDoi(epubData.identifier()).ifPresent(newDoc::setDoi);
                     }
                     newDoc.setMetadataSource("EPUB_METADATA");
+                } else if (isMobiOrAzwFile(filePath)) {
+                    MobiExtractionService.ExtractedMobiData mobiData = mobiExtractionService.extractMobiData(filePath);
+                    if (!mobiData.valid()) {
+                        log.warn("Skipping corrupt new MOBI/AZW: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = mobiData.chapterCount();
+                    pageTexts = mobiData.chapterTexts();
+                    String lowerName = filePath.getFileName().toString().toLowerCase(Locale.ROOT);
+                    newDoc.setFormat(lowerName.endsWith(".azw") || lowerName.endsWith(".azw3") ? "AZW" : "MOBI");
+                    if (mobiData.title() != null && !mobiData.title().isBlank()) {
+                        newDoc.setMetaTitle(mobiData.title());
+                    }
+                    if (mobiData.authors() != null && !mobiData.authors().isBlank()) {
+                        newDoc.setAuthors(mobiData.authors());
+                    }
+                    if (mobiData.publicationYear() != null) {
+                        newDoc.setPublicationYear(mobiData.publicationYear());
+                    }
+                    if (mobiData.description() != null && !mobiData.description().isBlank()) {
+                        newDoc.setAbstractText(mobiData.description());
+                    }
+                    if (mobiData.identifier() != null && !mobiData.identifier().isBlank()) {
+                        metadataEnrichmentService.extractIsbn(mobiData.identifier()).ifPresent(newDoc::setIsbn);
+                    }
+                    newDoc.setMetadataSource("MOBI_METADATA");
                 } else {
                     PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
                     if (!extracted.valid()) {
@@ -379,13 +442,16 @@ public class DirectoryScannerService {
     }
 
     public boolean isSupportedDocument(Path path) {
-        String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase(Locale.ROOT) : "";
-        return name.endsWith(".pdf") || name.endsWith(".epub");
+        return isPdfFile(path) || isEpubFile(path) || isMobiOrAzwFile(path);
     }
 
     public boolean isEpubFile(Path path) {
         String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase(Locale.ROOT) : "";
         return name.endsWith(".epub");
+    }
+
+    public boolean isMobiOrAzwFile(Path path) {
+        return mobiExtractionService.isMobiOrAzwFile(path);
     }
 
     public boolean isPdfFile(Path path) {
@@ -432,8 +498,10 @@ public class DirectoryScannerService {
             String lower = displayName.toLowerCase(Locale.ROOT);
             if (lower.endsWith(".pdf")) {
                 displayName = displayName.substring(0, displayName.length() - 4);
-            } else if (lower.endsWith(".epub")) {
+            } else if (lower.endsWith(".epub") || lower.endsWith(".mobi") || lower.endsWith(".azw3")) {
                 displayName = displayName.substring(0, displayName.length() - 5);
+            } else if (lower.endsWith(".azw")) {
+                displayName = displayName.substring(0, displayName.length() - 4);
             }
 
             currentDir.files.add(new TreeNodeDto(

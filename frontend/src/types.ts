@@ -64,7 +64,7 @@ export interface DocumentItem {
   metadataSource?: string | null;
   metadataEnrichedAt?: string | null;
   noteCount?: number;
-  format?: 'PDF' | 'EPUB' | 'MOBI' | 'AZW';
+  format?: 'PDF' | 'EPUB' | 'MOBI' | 'AZW' | 'AZW3' | string;
 }
 
 export interface EpubChapterItem {
@@ -74,10 +74,16 @@ export interface EpubChapterItem {
   title: string;
 }
 
-export function isEpubDocument(doc?: { format?: string; fileName?: string } | null): boolean {
+export function isEbookDocument(doc?: { format?: string; fileName?: string } | null): boolean {
   if (!doc) return false;
-  if (doc.format === 'EPUB') return true;
-  return (doc.fileName || '').toLowerCase().endsWith('.epub');
+  const fmt = (doc.format || '').toUpperCase();
+  if (fmt === 'EPUB' || fmt === 'MOBI' || fmt === 'AZW' || fmt === 'AZW3') return true;
+  const name = (doc.fileName || '').toLowerCase();
+  return name.endsWith('.epub') || name.endsWith('.mobi') || name.endsWith('.azw') || name.endsWith('.azw3');
+}
+
+export function isEpubDocument(doc?: { format?: string; fileName?: string } | null): boolean {
+  return isEbookDocument(doc);
 }
 
 export function formatDocTitle(doc: { metaTitle?: string | null; fileName: string }): string {
@@ -130,6 +136,7 @@ export interface DocumentFacets {
   maxPublicationYear: number | null;
   pdfCount?: number;
   epubCount?: number;
+  mobiCount?: number;
   tags: TagFacet[];
 }
 

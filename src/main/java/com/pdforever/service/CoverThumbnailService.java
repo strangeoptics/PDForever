@@ -25,17 +25,20 @@ public class CoverThumbnailService {
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
     private final EpubExtractionService epubExtractionService;
+    private final MobiExtractionService mobiExtractionService;
 
     public CoverThumbnailService(
             StoragePathService storagePathService,
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
-            EpubExtractionService epubExtractionService
+            EpubExtractionService epubExtractionService,
+            MobiExtractionService mobiExtractionService
     ) {
         this.storagePathService = storagePathService;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
         this.epubExtractionService = epubExtractionService;
+        this.mobiExtractionService = mobiExtractionService;
     }
 
     public Path getCoversPath() {
@@ -81,9 +84,17 @@ public class CoverThumbnailService {
                 || (doc.getRelativePath() != null && doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".epub"))
                 || (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub"));
 
+        boolean isMobi = "MOBI".equalsIgnoreCase(doc.getFormat())
+                || "AZW".equalsIgnoreCase(doc.getFormat())
+                || "AZW3".equalsIgnoreCase(doc.getFormat())
+                || (doc.getRelativePath() != null && (doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".mobi") || doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".azw") || doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".azw3")))
+                || (doc.getFileName() != null && (doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".mobi") || doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".azw") || doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".azw3")));
+
         boolean rendered;
         if (isEpub) {
             rendered = epubExtractionService.renderCoverImage(pdfPath, coverPath);
+        } else if (isMobi) {
+            rendered = mobiExtractionService.renderCoverImage(pdfPath, coverPath);
         } else {
             rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
         }

@@ -39,6 +39,7 @@ public class LibraryManagementService {
     private final DocumentReadingProgressService readingProgressService;
     private final PdfExtractionService pdfExtractionService;
     private final EpubExtractionService epubExtractionService;
+    private final MobiExtractionService mobiExtractionService;
     private final MetadataEnrichmentService metadataEnrichmentService;
     private final DocumentDtoMapper mapper;
     private final StoragePathService storagePathService;
@@ -55,6 +56,7 @@ public class LibraryManagementService {
             DocumentReadingProgressService readingProgressService,
             PdfExtractionService pdfExtractionService,
             EpubExtractionService epubExtractionService,
+            MobiExtractionService mobiExtractionService,
             MetadataEnrichmentService metadataEnrichmentService,
             DocumentDtoMapper mapper,
             StoragePathService storagePathService,
@@ -69,6 +71,7 @@ public class LibraryManagementService {
         this.readingProgressService = readingProgressService;
         this.pdfExtractionService = pdfExtractionService;
         this.epubExtractionService = epubExtractionService;
+        this.mobiExtractionService = mobiExtractionService;
         this.metadataEnrichmentService = metadataEnrichmentService;
         this.mapper = mapper;
         this.storagePathService = storagePathService;
@@ -133,7 +136,7 @@ public class LibraryManagementService {
     public DocumentFacetsDto getDocumentFacets(String path) {
         String normPath = DocumentSpecifications.normalizePathPrefix(path);
         List<Object[]> aggRows = documentRepository.computeDocumentAggregateFacets(normPath);
-        Object[] agg = (aggRows != null && !aggRows.isEmpty()) ? aggRows.get(0) : new Object[14];
+        Object[] agg = (aggRows != null && !aggRows.isEmpty()) ? aggRows.get(0) : new Object[15];
 
         int totalDocs = toInt(agg[0]);
         int unreadCount = toInt(agg[1]);
@@ -149,6 +152,7 @@ public class LibraryManagementService {
         Integer maxPubYear = toNullableInt(agg[11]);
         int pdfCount = toInt(agg[12]);
         int epubCount = toInt(agg[13]);
+        int mobiCount = toInt(agg[14]);
 
         List<Object[]> noteRows = noteRepository.computeNoteFacetCounts(normPath);
         Object[] noteAgg = (noteRows != null && !noteRows.isEmpty()) ? noteRows.get(0) : new Object[2];
@@ -190,6 +194,7 @@ public class LibraryManagementService {
                 maxPubYear,
                 pdfCount,
                 epubCount,
+                mobiCount,
                 tagFacets
         );
     }
@@ -238,10 +243,10 @@ public class LibraryManagementService {
     public List<TocItemDto> getDocumentOutline(UUID id) {
         Document doc = findActiveDocumentOrThrow(id);
         Path filePath = getDocumentFilePath(id);
-        boolean isEpub = "EPUB".equalsIgnoreCase(doc.getFormat())
-                || (doc.getRelativePath() != null && doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".epub"))
-                || (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub"));
-        if (isEpub) {
+        if (isMobiOrAzw(doc)) {
+            return mobiExtractionService.extractOutline(filePath);
+        }
+        if (isEpub(doc)) {
             return epubExtractionService.extractOutline(filePath);
         }
         return pdfExtractionService.extractOutline(filePath);
@@ -250,15 +255,23 @@ public class LibraryManagementService {
     @Transactional(readOnly = true)
     public List<EpubExtractionService.ChapterInfo> getEpubChapters(UUID id) {
         Document doc = findActiveDocumentOrThrow(id);
-        Path epubPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
-        return epubExtractionService.getChapters(epubPath);
+        Path filePath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        if (isMobiOrAzw(doc)) {
+            return mobiExtractionService.getChapters(filePath).stream()
+                    .map(ch -> new EpubExtractionService.ChapterInfo(ch.index(), ch.id(), ch.href(), ch.title()))
+                    .toList();
+        }
+        return epubExtractionService.getChapters(filePath);
     }
 
     @Transactional(readOnly = true)
     public String getEpubChapterHtml(UUID id, int chapterIndex) throws IOException {
         Document doc = findActiveDocumentOrThrow(id);
-        Path epubPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
-        return epubExtractionService.getChapterHtml(epubPath, chapterIndex, id);
+        Path filePath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        if (isMobiOrAzw(doc)) {
+            return mobiExtractionService.getChapterHtml(filePath, chapterIndex, id);
+        }
+        return epubExtractionService.getChapterHtml(filePath, chapterIndex, id);
     }
 
     @Transactional(readOnly = true)
@@ -270,6 +283,37 @@ public class LibraryManagementService {
 
     public String getEpubResourceMimeType(String resourcePath) {
         return epubExtractionService.guessMimeType(resourcePath);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getMobiResource(UUID id, int index) throws IOException {
+        Document doc = findActiveDocumentOrThrow(id);
+        Path mobiPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        return mobiExtractionService.getResourceBytes(mobiPath, index);
+    }
+
+    public String getMobiResourceMimeType(byte[] bytes) {
+        return mobiExtractionService.guessMimeType(bytes);
+    }
+
+    private boolean isMobiOrAzw(Document doc) {
+        String format = doc.getFormat();
+        if ("MOBI".equalsIgnoreCase(format) || "AZW".equalsIgnoreCase(format) || "AZW3".equalsIgnoreCase(format)) {
+            return true;
+        }
+        String path = doc.getRelativePath() != null ? doc.getRelativePath().toLowerCase(Locale.ROOT) : "";
+        String name = doc.getFileName() != null ? doc.getFileName().toLowerCase(Locale.ROOT) : "";
+        return path.endsWith(".mobi") || path.endsWith(".azw") || path.endsWith(".azw3")
+                || name.endsWith(".mobi") || name.endsWith(".azw") || name.endsWith(".azw3");
+    }
+
+    private boolean isEpub(Document doc) {
+        if ("EPUB".equalsIgnoreCase(doc.getFormat())) {
+            return true;
+        }
+        String path = doc.getRelativePath() != null ? doc.getRelativePath().toLowerCase(Locale.ROOT) : "";
+        String name = doc.getFileName() != null ? doc.getFileName().toLowerCase(Locale.ROOT) : "";
+        return path.endsWith(".epub") || name.endsWith(".epub");
     }
 
     // --- Cover Thumbnail Operations ---

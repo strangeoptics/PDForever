@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -226,9 +227,13 @@ public class MetadataEnrichmentService {
             int lastSlash = normRel.lastIndexOf('/');
             rawName = lastSlash >= 0 ? normRel.substring(lastSlash + 1) : normRel;
         }
-        String nameWithoutExt = rawName.toLowerCase().endsWith(".pdf")
-                ? rawName.substring(0, rawName.length() - 4)
-                : rawName;
+        String lowerName = rawName.toLowerCase(Locale.ROOT);
+        String nameWithoutExt = rawName;
+        if (lowerName.endsWith(".pdf") || lowerName.endsWith(".azw")) {
+            nameWithoutExt = rawName.substring(0, rawName.length() - 4);
+        } else if (lowerName.endsWith(".epub") || lowerName.endsWith(".mobi") || lowerName.endsWith(".azw3")) {
+            nameWithoutExt = rawName.substring(0, rawName.length() - 5);
+        }
 
         // 1. Check filename for explicit "M.YY" / "MM.YY" / "MM.YYYY" pattern (e.g. "1.23" -> 2023)
         Matcher monthYearMatcher = FILENAME_MONTH_YEAR_PATTERN.matcher(nameWithoutExt);
@@ -244,8 +249,11 @@ public class MetadataEnrichmentService {
         if (!normRel.isEmpty()) {
             int lastSlash = normRel.lastIndexOf('/');
             String relFileName = lastSlash >= 0 ? normRel.substring(lastSlash + 1) : normRel;
-            if (relFileName.toLowerCase().endsWith(".pdf")) {
+            String lowerRel = relFileName.toLowerCase(Locale.ROOT);
+            if (lowerRel.endsWith(".pdf") || lowerRel.endsWith(".azw")) {
                 relFileName = relFileName.substring(0, relFileName.length() - 4);
+            } else if (lowerRel.endsWith(".epub") || lowerRel.endsWith(".mobi") || lowerRel.endsWith(".azw3")) {
+                relFileName = relFileName.substring(0, relFileName.length() - 5);
             }
             Matcher relMonthYearMatcher = FILENAME_MONTH_YEAR_PATTERN.matcher(relFileName);
             if (relMonthYearMatcher.find()) {

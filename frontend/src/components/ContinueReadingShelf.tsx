@@ -42,13 +42,21 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.m
               <div className="flex items-start justify-between gap-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 ${
-                      isEpub
-                        ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30'
-                        : 'bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20'
-                    }`}>
-                      {isEpub ? 'EPUB' : 'PDF'}
-                    </span>
+                    {(() => {
+                      const fmt = (doc.format || (doc.fileName.toLowerCase().endsWith('.mobi') ? 'MOBI' : doc.fileName.toLowerCase().endsWith('.azw') || doc.fileName.toLowerCase().endsWith('.azw3') ? 'AZW' : doc.fileName.toLowerCase().endsWith('.epub') ? 'EPUB' : 'PDF')).toUpperCase();
+                      const badgeClasses = fmt === 'MOBI'
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                        : fmt === 'AZW' || fmt === 'AZW3'
+                        ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
+                        : fmt === 'EPUB'
+                        ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30'
+                        : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20';
+                      return (
+                        <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 border ${badgeClasses}`}>
+                          {fmt}
+                        </span>
+                      );
+                    })()}
                     <h3
                       className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate"
                       title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}

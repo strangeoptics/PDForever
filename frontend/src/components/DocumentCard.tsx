@@ -35,10 +35,27 @@ export const DocumentCard: React.FC<DocumentCardProps> = React.memo(
     );
 
     const status: ReadingStatus = doc.readingStatus || 'UNREAD';
-    const isEpub = isEpubDocument(doc);
+    const isEbook = isEpubDocument(doc);
 
     const renderFormatBadge = () => {
-      if (isEpub) {
+      const fmt = (doc.format || (doc.fileName.toLowerCase().endsWith('.mobi') ? 'MOBI' : doc.fileName.toLowerCase().endsWith('.azw') || doc.fileName.toLowerCase().endsWith('.azw3') ? 'AZW' : doc.fileName.toLowerCase().endsWith('.epub') ? 'EPUB' : 'PDF')).toUpperCase();
+      if (fmt === 'MOBI') {
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+            <BookOpen className="w-2.5 h-2.5" />
+            MOBI
+          </span>
+        );
+      }
+      if (fmt === 'AZW' || fmt === 'AZW3') {
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+            <BookOpen className="w-2.5 h-2.5" />
+            AZW
+          </span>
+        );
+      }
+      if (fmt === 'EPUB') {
         return (
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
             <BookOpen className="w-2.5 h-2.5" />
@@ -64,7 +81,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = React.memo(
         );
       }
       if (status === 'READING') {
-        const unit = isEpub ? 'Kap.' : 'S.';
+        const unit = isEbook ? 'Kap.' : 'S.';
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
             <Clock className="w-3 h-3" />
@@ -118,12 +135,12 @@ export const DocumentCard: React.FC<DocumentCardProps> = React.memo(
               {!showCovers && (
                 <div
                   className={`p-2 rounded-lg shrink-0 mr-0.5 ${
-                    isEpub
+                    isEbook
                       ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
                       : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                   }`}
                 >
-                  {isEpub ? <BookOpen className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+                  {isEbook ? <BookOpen className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
                 </div>
               )}
               <div className="flex-1 min-w-0">

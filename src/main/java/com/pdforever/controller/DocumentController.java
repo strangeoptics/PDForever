@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -54,9 +55,18 @@ public class DocumentController {
     }
 
     @PostMapping("/tree/reconcile")
-    public TreeNodeDto reconcileAndGetTree() {
-        scannerService.reconcileLibrary();
+    public TreeNodeDto reconcileAndGetTree(
+            @RequestParam(defaultValue = "false") boolean force
+    ) {
+        scannerService.reconcileLibrary(force);
         return scannerService.buildDirectoryTree();
+    }
+
+    @PostMapping("/documents/{id}/reindex")
+    public DocumentDto reindexDocument(@PathVariable UUID id) {
+        Path filePath = libraryService.getDocumentFilePath(id);
+        scannerService.ingestOrUpdateFile(filePath, true, true);
+        return libraryService.getDocument(id);
     }
 
     @GetMapping("/documents")
@@ -204,8 +214,24 @@ public class DocumentController {
                 .body(bytes);
     }
 
+    @GetMapping("/documents/{id}/mobi/resource")
+    public ResponseEntity<byte[]> getMobiResource(
+            @PathVariable UUID id,
+            @RequestParam(name = "index", defaultValue = "0") int index
+    ) throws IOException {
+        byte[] bytes = libraryService.getMobiResource(id, index);
+        if (bytes == null || bytes.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String mimeType = libraryService.getMobiResourceMimeType(bytes);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(mimeType))
+                .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS))
+                .body(bytes);
+    }
+
     /**
-     * Streams a document file (PDF or EPUB) with full HTTP Byte-Range (206 Partial Content) support via Spring's ResourceRegion.
+     * Streams a document file (PDF, EPUB, MOBI, or AZW) with full HTTP Byte-Range (206 Partial Content) support via Spring's ResourceRegion.
      */
     @GetMapping("/documents/{id}/stream")
     public ResponseEntity<ResourceRegion> streamDocument(
@@ -216,9 +242,17 @@ public class DocumentController {
         Resource resource = new FileSystemResource(filePath);
         long contentLength = resource.contentLength();
 
-        MediaType contentType = filePath.getFileName().toString().toLowerCase().endsWith(".epub")
-                ? MediaType.parseMediaType("application/epub+zip")
-                : MediaType.APPLICATION_PDF;
+        String lowerName = filePath.getFileName().toString().toLowerCase(Locale.ROOT);
+        MediaType contentType;
+        if (lowerName.endsWith(".epub")) {
+            contentType = MediaType.parseMediaType("application/epub+zip");
+        } else if (lowerName.endsWith(".mobi")) {
+            contentType = MediaType.parseMediaType("application/x-mobipocket-ebook");
+        } else if (lowerName.endsWith(".azw") || lowerName.endsWith(".azw3")) {
+            contentType = MediaType.parseMediaType("application/vnd.amazon.ebook");
+        } else {
+            contentType = MediaType.APPLICATION_PDF;
+        }
 
         List<HttpRange> ranges = headers.getRange();
         if (ranges.isEmpty()) {

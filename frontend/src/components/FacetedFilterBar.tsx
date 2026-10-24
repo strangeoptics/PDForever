@@ -93,13 +93,14 @@ export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = React.memo(({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Format Filter Pills (Alle / PDF / EPUB) */}
+          {/* Format Filter Pills (Alle / PDF / EPUB / MOBI & AZW) */}
           <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
             {(
               [
                 { value: '', label: 'Alle Formate', count: facets?.totalDocuments, icon: null },
                 { value: 'PDF', label: 'PDF', count: facets?.pdfCount, icon: FileText, color: 'text-red-500' },
                 { value: 'EPUB', label: 'EPUB', count: facets?.epubCount, icon: BookOpen, color: 'text-purple-500' },
+                { value: 'MOBI', label: 'MOBI / AZW', count: facets?.mobiCount, icon: BookOpen, color: 'text-amber-500' },
               ] as const
             ).map((tab) => {
               const Icon = tab.icon;
