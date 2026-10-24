@@ -113,7 +113,7 @@ public class MetadataEnrichmentService {
      * queries CrossRef / Semantic Scholar / OpenLibrary when enabled, and updates the Document entity in place.
      */
     public boolean enrichDocument(Document doc, Path pdfPath, List<String> preExtractedPages) {
-        return enrichDocument(doc, pdfPath, preExtractedPages, false);
+        return enrichDocument(doc, pdfPath, preExtractedPages, false, true);
     }
 
     /**
@@ -121,6 +121,14 @@ public class MetadataEnrichmentService {
      * queries CrossRef / Semantic Scholar / OpenLibrary when enabled, and updates the Document entity in place.
      */
     public boolean enrichDocument(Document doc, Path pdfPath, List<String> preExtractedPages, boolean force) {
+        return enrichDocument(doc, pdfPath, preExtractedPages, force, true);
+    }
+
+    /**
+     * Scans the first 1-3 pages (plus raw filename and PDF DocumentInformation) for DOIs and ISBNs,
+     * optionally queries external APIs when {@code allowExternalLookup} is true, and updates the Document entity.
+     */
+    public boolean enrichDocument(Document doc, Path pdfPath, List<String> preExtractedPages, boolean force, boolean allowExternalLookup) {
         List<String> firstPages = (preExtractedPages != null && !preExtractedPages.isEmpty())
                 ? preExtractedPages.subList(0, Math.min(MAX_PAGES_TO_SCAN, preExtractedPages.size()))
                 : extractFirstPagesText(pdfPath, MAX_PAGES_TO_SCAN);
@@ -162,8 +170,8 @@ public class MetadataEnrichmentService {
             changed = true;
         }
 
-        // 1. Query CrossRef & Semantic Scholar if DOI is available
-        if (externalLookupEnabled && detectedDoi != null) {
+        // 1. Query CrossRef & Semantic Scholar if DOI is available and external lookup is permitted
+        if (allowExternalLookup && externalLookupEnabled && detectedDoi != null) {
             Optional<EnrichedMetadata> doiMeta = lookupByDoi(detectedDoi);
             if (doiMeta.isPresent()) {
                 applyMetadataToDocument(doc, doiMeta.get());
@@ -175,8 +183,8 @@ public class MetadataEnrichmentService {
             }
         }
 
-        // 2. Query OpenLibrary if ISBN is available
-        if (externalLookupEnabled && detectedIsbn != null) {
+        // 2. Query OpenLibrary if ISBN is available and external lookup is permitted
+        if (allowExternalLookup && externalLookupEnabled && detectedIsbn != null) {
             Optional<EnrichedMetadata> isbnMeta = lookupByIsbn(detectedIsbn);
             if (isbnMeta.isPresent()) {
                 applyMetadataToDocument(doc, isbnMeta.get());

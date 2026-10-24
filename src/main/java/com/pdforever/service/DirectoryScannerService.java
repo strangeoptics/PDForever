@@ -33,6 +33,7 @@ public class DirectoryScannerService {
     private final LuceneIndexService luceneIndexService;
     private final FileNameCleaner fileNameCleaner;
     private final MetadataEnrichmentService metadataEnrichmentService;
+    private final AsyncMetadataEnrichmentService asyncMetadataEnrichmentService;
 
     public DirectoryScannerService(
             LibraryProperties properties,
@@ -42,7 +43,8 @@ public class DirectoryScannerService {
             PdfExtractionService pdfExtractionService,
             LuceneIndexService luceneIndexService,
             FileNameCleaner fileNameCleaner,
-            MetadataEnrichmentService metadataEnrichmentService
+            MetadataEnrichmentService metadataEnrichmentService,
+            AsyncMetadataEnrichmentService asyncMetadataEnrichmentService
     ) {
         this.properties = properties;
         this.storagePathService = storagePathService;
@@ -52,6 +54,7 @@ public class DirectoryScannerService {
         this.luceneIndexService = luceneIndexService;
         this.fileNameCleaner = fileNameCleaner;
         this.metadataEnrichmentService = metadataEnrichmentService;
+        this.asyncMetadataEnrichmentService = asyncMetadataEnrichmentService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -139,6 +142,13 @@ public class DirectoryScannerService {
                     documentRepository.save(doc);
                     log.info("Purged junk metaTitle from active document {}: relativePath={}", doc.getId(), doc.getRelativePath());
                 }
+
+                if (!doc.isDeleted() && (doc.getDoi() != null || doc.getIsbn() != null)) {
+                    String source = doc.getMetadataSource();
+                    if (source == null || "PATH_HEURISTIC".equalsIgnoreCase(source) || "PDF_INFO".equalsIgnoreCase(source)) {
+                        asyncMetadataEnrichmentService.enqueue(doc.getId());
+                    }
+                }
             }
         } catch (IOException e) {
             log.error("Failed during batched Lucene commit in library reconciliation: {}", e.getMessage(), e);
@@ -223,8 +233,11 @@ public class DirectoryScannerService {
                 existing.setPageCount(extracted.pageCount());
                 existing.setLastModifiedFs(lastModifiedFs);
                 existing.setDeleted(false);
-                metadataEnrichmentService.enrichDocument(existing, filePath, extracted.pageTexts(), false);
+                metadataEnrichmentService.enrichDocument(existing, filePath, extracted.pageTexts(), false, false);
                 Document saved = documentRepository.save(existing);
+                if (saved.getDoi() != null || saved.getIsbn() != null) {
+                    asyncMetadataEnrichmentService.enqueue(saved.getId());
+                }
 
                 deleteCachedCover(saved.getId());
                 luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
@@ -245,9 +258,12 @@ public class DirectoryScannerService {
                 newDoc.setLastModifiedFs(lastModifiedFs);
                 newDoc.setCreatedAt(Instant.now());
                 newDoc.setDeleted(false);
-                metadataEnrichmentService.enrichDocument(newDoc, filePath, extracted.pageTexts(), false);
+                metadataEnrichmentService.enrichDocument(newDoc, filePath, extracted.pageTexts(), false, false);
 
                 Document saved = documentRepository.save(newDoc);
+                if (saved.getDoi() != null || saved.getIsbn() != null) {
+                    asyncMetadataEnrichmentService.enqueue(saved.getId());
+                }
                 luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
                 log.info("Indexed new PDF: {} ({} pages, commitImmediately={})", relPath, extracted.pageCount(), commitImmediately);
                 return IngestionOutcome.ADDED;
