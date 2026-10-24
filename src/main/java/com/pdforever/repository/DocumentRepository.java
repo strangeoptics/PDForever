@@ -56,4 +56,19 @@ public interface DocumentRepository extends JpaRepository<Document, UUID>, JpaSp
             GROUP BY t.id
             """)
     List<Object[]> countDocumentsPerTag(@Param("pathPrefix") String pathPrefix);
+
+    public interface DocumentTreeItem {
+        UUID getId();
+        String getRelativePath();
+        String getFileName();
+        Integer getPageCount();
+    }
+
+    @Query("""
+            SELECT d.id AS id, d.relativePath AS relativePath, d.fileName AS fileName, d.pageCount AS pageCount
+            FROM Document d
+            WHERE d.isDeleted = false
+            ORDER BY d.relativePath ASC
+            """)
+    List<DocumentTreeItem> findActiveTreeItems();
 }

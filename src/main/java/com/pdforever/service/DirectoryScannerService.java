@@ -236,56 +236,79 @@ public class DirectoryScannerService {
     }
 
     /**
-     * Builds a hierarchical JSON tree of library.root-dir for sidebar navigation.
+     * Builds a hierarchical JSON tree of active documents for sidebar navigation.
+     * Constructed entirely in-memory from portable relative database paths without physical disk I/O.
      */
     public TreeNodeDto buildDirectoryTree() {
-        List<Document> activeDocs = documentRepository.findAllByIsDeletedFalseOrderByRelativePathAsc();
-        Map<String, Document> docByRelPath = new HashMap<>();
-        for (Document doc : activeDocs) {
-            docByRelPath.put(doc.getRelativePath(), doc);
-        }
-
-        Path root = getRootPath();
-        return buildNodeRecursive(root, "", docByRelPath);
+        List<DocumentRepository.DocumentTreeItem> items = documentRepository.findActiveTreeItems();
+        return buildTreeFromItems(items);
     }
 
-    private TreeNodeDto buildNodeRecursive(Path dir, String relPath, Map<String, Document> docByRelPath) {
-        String name = relPath.isEmpty() ? "Library" : dir.getFileName().toString();
-        List<TreeNodeDto> dirChildren = new ArrayList<>();
-        List<TreeNodeDto> fileChildren = new ArrayList<>();
+    public TreeNodeDto buildTreeFromItems(List<DocumentRepository.DocumentTreeItem> items) {
+        DirectoryBuilder rootBuilder = new DirectoryBuilder("Library", "");
 
-        if (Files.exists(dir) && Files.isDirectory(dir)) {
-            try (Stream<Path> entries = Files.list(dir)) {
-                List<Path> sorted = entries.sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT))).toList();
-                for (Path entry : sorted) {
-                    String childRel = toRelativePath(entry);
-                    if (Files.isDirectory(entry)) {
-                        TreeNodeDto childDir = buildNodeRecursive(entry, childRel, docByRelPath);
-                        dirChildren.add(childDir);
-                    } else if (Files.isRegularFile(entry) && isPdfFile(entry)) {
-                        Document doc = docByRelPath.get(childRel);
-                        if (doc != null && !doc.isDeleted()) {
-                            fileChildren.add(new TreeNodeDto(
-                                    doc.getFileName(),
-                                    childRel,
-                                    "file",
-                                    doc.getId(),
-                                    doc.getPageCount(),
-                                    Collections.emptyList()
-                            ));
-                        }
-                    }
-                }
-            } catch (IOException e) {
-                log.warn("Error listing directory {}: {}", dir, e.getMessage());
+        for (DocumentRepository.DocumentTreeItem item : items) {
+            String relPath = item.getRelativePath();
+            if (relPath == null || relPath.isBlank()) {
+                continue;
             }
+
+            String[] segments = relPath.split("/");
+            DirectoryBuilder currentDir = rootBuilder;
+            StringBuilder currentPath = new StringBuilder();
+
+            for (int i = 0; i < segments.length - 1; i++) {
+                String dirName = segments[i];
+                if (currentPath.length() > 0) {
+                    currentPath.append("/");
+                }
+                currentPath.append(dirName);
+                String stepPath = currentPath.toString();
+                currentDir = currentDir.subDirectories.computeIfAbsent(
+                        dirName,
+                        name -> new DirectoryBuilder(name, stepPath)
+                );
+            }
+
+            currentDir.files.add(new TreeNodeDto(
+                    item.getFileName() != null ? item.getFileName() : segments[segments.length - 1],
+                    relPath,
+                    "file",
+                    item.getId(),
+                    item.getPageCount(),
+                    Collections.emptyList()
+            ));
         }
 
-        List<TreeNodeDto> combined = new ArrayList<>(dirChildren.size() + fileChildren.size());
-        combined.addAll(dirChildren);
-        combined.addAll(fileChildren);
+        return rootBuilder.toTreeNodeDto();
+    }
 
-        return new TreeNodeDto(name, relPath, "directory", null, null, combined);
+    private static class DirectoryBuilder {
+        final String name;
+        final String relPath;
+        final Map<String, DirectoryBuilder> subDirectories = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        final List<TreeNodeDto> files = new ArrayList<>();
+
+        DirectoryBuilder(String name, String relPath) {
+            this.name = name;
+            this.relPath = relPath;
+        }
+
+        TreeNodeDto toTreeNodeDto() {
+            List<TreeNodeDto> dirChildren = subDirectories.values().stream()
+                    .map(DirectoryBuilder::toTreeNodeDto)
+                    .toList();
+
+            List<TreeNodeDto> sortedFiles = files.stream()
+                    .sorted(Comparator.comparing(f -> f.name().toLowerCase(Locale.ROOT)))
+                    .toList();
+
+            List<TreeNodeDto> combined = new ArrayList<>(dirChildren.size() + sortedFiles.size());
+            combined.addAll(dirChildren);
+            combined.addAll(sortedFiles);
+
+            return new TreeNodeDto(name, relPath, "directory", null, null, combined);
+        }
     }
 }
 

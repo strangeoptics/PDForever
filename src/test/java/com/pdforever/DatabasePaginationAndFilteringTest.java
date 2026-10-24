@@ -48,6 +48,9 @@ class DatabasePaginationAndFilteringTest {
     @Autowired
     private LibraryManagementService libraryService;
 
+    @Autowired
+    private com.pdforever.service.DirectoryScannerService scannerService;
+
     @Test
     void testDbDrivenPaginationSortingAndFacets() {
         // 1. Create tags
@@ -175,6 +178,25 @@ class DatabasePaginationAndFilteringTest {
         assertThat(frontendFacets.completedCount()).isEqualTo(1);
         assertThat(frontendFacets.minPublicationYear()).isEqualTo(2021);
         assertThat(frontendFacets.maxPublicationYear()).isEqualTo(2022);
+
+        // 11. Test in-memory buildDirectoryTree() without disk I/O
+        TreeNodeDto tree = scannerService.buildDirectoryTree();
+        assertThat(tree.name()).isEqualTo("Library");
+        assertThat(tree.type()).isEqualTo("directory");
+        assertThat(tree.path()).isEqualTo("");
+        // Root has 3 directory children: Backend, Frontend, Short
+        assertThat(tree.children()).extracting(TreeNodeDto::name).containsExactly("Backend", "Frontend", "Short");
+
+        TreeNodeDto backendNode = tree.children().get(0);
+        assertThat(backendNode.name()).isEqualTo("Backend");
+        assertThat(backendNode.path()).isEqualTo("Backend");
+        assertThat(backendNode.type()).isEqualTo("directory");
+        assertThat(backendNode.children()).hasSize(3);
+        assertThat(backendNode.children()).extracting(TreeNodeDto::name)
+                .containsExactly("Clean Architecture", "Java Concurrency in Practice", "Spring Boot Reference");
+        assertThat(backendNode.children().get(1).type()).isEqualTo("file");
+        assertThat(backendNode.children().get(1).documentId()).isEqualTo(doc1.getId());
+        assertThat(backendNode.children().get(1).pageCount()).isEqualTo(350);
     }
 
     private Document createDoc(String relPath, String fileName, int pages, int year, String status) {
