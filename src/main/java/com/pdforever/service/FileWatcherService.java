@@ -21,6 +21,7 @@ public class FileWatcherService {
     private static final Logger log = LoggerFactory.getLogger(FileWatcherService.class);
 
     private final LibraryProperties properties;
+    private final StoragePathService storagePathService;
     private final DirectoryScannerService scannerService;
     private final Map<WatchKey, Path> watchKeys = new ConcurrentHashMap<>();
     private final Map<Path, CompletableFuture<Void>> pendingTasks = new ConcurrentHashMap<>();
@@ -29,8 +30,13 @@ public class FileWatcherService {
     private WatchService watchService;
     private volatile boolean running = false;
 
-    public FileWatcherService(LibraryProperties properties, DirectoryScannerService scannerService) {
+    public FileWatcherService(
+            LibraryProperties properties,
+            StoragePathService storagePathService,
+            DirectoryScannerService scannerService
+    ) {
         this.properties = properties;
+        this.storagePathService = storagePathService;
         this.scannerService = scannerService;
     }
 
@@ -41,7 +47,7 @@ public class FileWatcherService {
             return;
         }
         try {
-            Path root = scannerService.getRootPath();
+            Path root = storagePathService.getRootPath();
             Files.createDirectories(root);
             this.watchService = FileSystems.getDefault().newWatchService();
             registerRecursive(root);

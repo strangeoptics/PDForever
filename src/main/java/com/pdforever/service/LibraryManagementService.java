@@ -39,7 +39,7 @@ public class LibraryManagementService {
     private final PdfExtractionService pdfExtractionService;
     private final MetadataEnrichmentService metadataEnrichmentService;
     private final DocumentDtoMapper mapper;
-    private final LibraryProperties properties;
+    private final StoragePathService storagePathService;
     @PersistenceContext
     private final EntityManager entityManager;
 
@@ -54,7 +54,7 @@ public class LibraryManagementService {
             PdfExtractionService pdfExtractionService,
             MetadataEnrichmentService metadataEnrichmentService,
             DocumentDtoMapper mapper,
-            LibraryProperties properties,
+            StoragePathService storagePathService,
             EntityManager entityManager
     ) {
         this.documentRepository = documentRepository;
@@ -67,7 +67,7 @@ public class LibraryManagementService {
         this.pdfExtractionService = pdfExtractionService;
         this.metadataEnrichmentService = metadataEnrichmentService;
         this.mapper = mapper;
-        this.properties = properties;
+        this.storagePathService = storagePathService;
         this.entityManager = entityManager;
     }
 
@@ -209,9 +209,8 @@ public class LibraryManagementService {
     @Transactional(readOnly = true)
     public Path getDocumentFilePath(UUID id) {
         Document doc = findActiveDocumentOrThrow(id);
-        Path root = properties.rootDir().toAbsolutePath().normalize();
-        Path fullPath = root.resolve(doc.getRelativePath()).normalize();
-        if (!fullPath.startsWith(root) || !Files.exists(fullPath)) {
+        Path fullPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        if (!Files.exists(fullPath)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF file not found on disk: " + doc.getRelativePath());
         }
         return fullPath;
@@ -348,7 +347,6 @@ public class LibraryManagementService {
         int identifiersDetected = 0;
         int enriched = 0;
 
-        Path root = properties.rootDir().toAbsolutePath().normalize();
         for (Document doc : activeDocs) {
             if (!force && doc.getMetadataEnrichedAt() != null && !"MANUAL".equalsIgnoreCase(doc.getMetadataSource())) {
                 if (doc.getMetaTitle() != null && !doc.getMetaTitle().isBlank()) {
@@ -358,8 +356,8 @@ public class LibraryManagementService {
             if ("MANUAL".equalsIgnoreCase(doc.getMetadataSource()) && !force) {
                 continue;
             }
-            Path fullPath = root.resolve(doc.getRelativePath()).normalize();
-            if (!fullPath.startsWith(root) || !Files.exists(fullPath)) {
+            Path fullPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+            if (!Files.exists(fullPath)) {
                 continue;
             }
             scanned++;

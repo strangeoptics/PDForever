@@ -26,6 +26,8 @@ public class DirectoryScannerService {
     private static final int BATCH_COMMIT_INTERVAL = 50;
 
     private final LibraryProperties properties;
+    private final StoragePathService storagePathService;
+    private final CoverThumbnailService coverThumbnailService;
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
     private final LuceneIndexService luceneIndexService;
@@ -34,6 +36,8 @@ public class DirectoryScannerService {
 
     public DirectoryScannerService(
             LibraryProperties properties,
+            StoragePathService storagePathService,
+            CoverThumbnailService coverThumbnailService,
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
             LuceneIndexService luceneIndexService,
@@ -41,6 +45,8 @@ public class DirectoryScannerService {
             MetadataEnrichmentService metadataEnrichmentService
     ) {
         this.properties = properties;
+        this.storagePathService = storagePathService;
+        this.coverThumbnailService = coverThumbnailService;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
         this.luceneIndexService = luceneIndexService;
@@ -54,17 +60,15 @@ public class DirectoryScannerService {
     }
 
     public Path getRootPath() {
-        return properties.rootDir().toAbsolutePath().normalize();
+        return storagePathService.getRootPath();
     }
 
     public Path getCoversPath() {
-        return properties.coversDir().toAbsolutePath().normalize();
+        return storagePathService.getCoversPath();
     }
 
     public String toRelativePath(Path file) {
-        Path root = getRootPath();
-        Path normalizedFile = file.toAbsolutePath().normalize();
-        return root.relativize(normalizedFile).toString().replace('\\', '/');
+        return storagePathService.toRelativePath(file);
     }
 
     /**
@@ -282,12 +286,7 @@ public class DirectoryScannerService {
     }
 
     private void deleteCachedCover(UUID docId) {
-        if (docId == null) return;
-        try {
-            Files.deleteIfExists(getCoversPath().resolve(docId + ".jpg"));
-        } catch (IOException e) {
-            log.debug("Failed to delete cached cover for {}: {}", docId, e.getMessage());
-        }
+        coverThumbnailService.deleteCachedCover(docId);
     }
 
     public boolean isPdfFile(Path path) {
