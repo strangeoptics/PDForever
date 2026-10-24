@@ -1,6 +1,7 @@
 package com.pdforever.domain;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -80,7 +81,8 @@ public class Document {
     @Column(name = "metadata_enriched_at")
     private Instant metadataEnrichedAt;
 
-    @ManyToMany(fetch = FetchType.EAGER)
+    @ManyToMany(fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
     @JoinTable(
             name = "document_tags",
             joinColumns = @JoinColumn(name = "document_id"),

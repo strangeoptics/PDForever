@@ -396,7 +396,7 @@ public class LibraryManagementService {
 
     @Transactional
     public ReadingNoteDto updateNote(UUID noteId, UpdateNoteRequest request) {
-        ReadingNote note = noteRepository.findById(noteId)
+        ReadingNote note = noteRepository.findByIdWithDocument(noteId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading note not found: " + noteId));
         if (request.selectedText() != null) {
             note.setSelectedText(request.selectedText());

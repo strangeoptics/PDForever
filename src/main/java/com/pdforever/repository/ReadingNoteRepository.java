@@ -8,12 +8,26 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface ReadingNoteRepository extends JpaRepository<ReadingNote, UUID> {
 
-    List<ReadingNote> findAllByDocumentIdOrderByPageNumberAscCreatedAtAsc(UUID documentId);
+    @Query("""
+            SELECT n FROM ReadingNote n
+            JOIN FETCH n.document d
+            WHERE d.id = :documentId
+            ORDER BY n.pageNumber ASC, n.createdAt ASC
+            """)
+    List<ReadingNote> findAllByDocumentIdOrderByPageNumberAscCreatedAtAsc(@Param("documentId") UUID documentId);
+
+    @Query("""
+            SELECT n FROM ReadingNote n
+            JOIN FETCH n.document d
+            WHERE n.id = :id
+            """)
+    Optional<ReadingNote> findByIdWithDocument(@Param("id") UUID id);
 
     int countByDocumentId(UUID documentId);
 

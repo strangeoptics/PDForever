@@ -26,7 +26,7 @@ public class ReadingNote {
     @Column(length = 36, nullable = false, updatable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "document_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Document document;
