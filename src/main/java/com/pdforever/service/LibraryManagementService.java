@@ -39,6 +39,7 @@ public class LibraryManagementService {
     private final DirectoryScannerService scannerService;
     private final PdfExtractionService pdfExtractionService;
     private final MetadataEnrichmentService metadataEnrichmentService;
+    private final FileNameCleaner fileNameCleaner;
     private final ObjectMapper objectMapper;
     @PersistenceContext
     private final EntityManager entityManager;
@@ -50,6 +51,7 @@ public class LibraryManagementService {
             DirectoryScannerService scannerService,
             PdfExtractionService pdfExtractionService,
             MetadataEnrichmentService metadataEnrichmentService,
+            FileNameCleaner fileNameCleaner,
             ObjectMapper objectMapper,
             EntityManager entityManager
     ) {
@@ -59,6 +61,7 @@ public class LibraryManagementService {
         this.scannerService = scannerService;
         this.pdfExtractionService = pdfExtractionService;
         this.metadataEnrichmentService = metadataEnrichmentService;
+        this.fileNameCleaner = fileNameCleaner;
         this.objectMapper = objectMapper;
         this.entityManager = entityManager;
     }
@@ -525,6 +528,10 @@ public class LibraryManagementService {
                 .sorted(Comparator.comparing(Tag::getName, String.CASE_INSENSITIVE_ORDER))
                 .map(this::toTagDto)
                 .toList();
+        String metaTitle = doc.getMetaTitle();
+        if (metaTitle != null && fileNameCleaner.isJunkOrAdTitle(metaTitle)) {
+            metaTitle = null;
+        }
         return new DocumentDto(
                 doc.getId(),
                 doc.getRelativePath(),
@@ -539,7 +546,7 @@ public class LibraryManagementService {
                 doc.getLastOpenedAt(),
                 doc.getDoi(),
                 doc.getIsbn(),
-                doc.getMetaTitle(),
+                metaTitle,
                 doc.getAuthors(),
                 resolvePublicationYear(doc),
                 doc.getAbstractText(),

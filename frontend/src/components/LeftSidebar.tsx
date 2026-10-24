@@ -26,6 +26,7 @@ import {
   Tag,
   TocItem,
   TreeNode,
+  formatDocTitle,
 } from '../types';
 import {
   TocTreeNode,
@@ -395,9 +396,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
                   <div className="flex items-center justify-between gap-2 px-1">
                     <span
                       className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate"
-                      title={activeDoc.fileName}
+                      title={activeDoc.metaTitle ? `${activeDoc.metaTitle} (${activeDoc.fileName})` : activeDoc.fileName}
                     >
-                      {activeDoc.fileName}
+                      {formatDocTitle(activeDoc)}
                     </span>
                     {totalTocCount > 0 && (
                       <span className="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">

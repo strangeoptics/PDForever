@@ -30,6 +30,8 @@ library:
   watcher-enabled: true
   clean-remove-literals:
     - "_de.downmagaz.net"
+    - "de.downmagaz.net"
+    - "downmagaz.net"
   clean-remove-regexes:
     - "(?<=\\b(?:18|19|20)\\d{2})\\s*--.*$"
 

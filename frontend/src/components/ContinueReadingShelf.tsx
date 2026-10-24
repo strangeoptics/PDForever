@@ -1,6 +1,6 @@
 import React from 'react';
 import { Clock, Play } from 'lucide-react';
-import { DocumentItem } from '../types';
+import { DocumentItem, formatDocTitle } from '../types';
 
 interface ContinueReadingShelfProps {
   recentDocuments: DocumentItem[];
@@ -40,9 +40,9 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.m
                 <div className="min-w-0 flex-1">
                   <h3
                     className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate"
-                    title={doc.metaTitle || doc.fileName}
+                    title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
                   >
-                    {doc.metaTitle || doc.fileName}
+                    {formatDocTitle(doc)}
                   </h3>
                   {(doc.authors || doc.publicationYear) && (
                     <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate">

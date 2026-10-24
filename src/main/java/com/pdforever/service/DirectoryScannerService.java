@@ -106,6 +106,17 @@ public class DirectoryScannerService {
             if (!doc.isDeleted() && !discoveredPdfs.containsKey(doc.getRelativePath())) {
                 markDocumentDeleted(doc);
                 deleted++;
+            } else if (!doc.isDeleted() && doc.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(doc.getMetaTitle())) {
+                doc.setMetaTitle(null);
+                if ("PDF_INFO".equals(doc.getMetadataSource())) {
+                    doc.setMetadataSource(null);
+                }
+                if (doc.getPublicationYear() == null) {
+                    metadataEnrichmentService.extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                            .ifPresent(doc::setPublicationYear);
+                }
+                documentRepository.save(doc);
+                log.info("Purged junk metaTitle from active document {}: relativePath={}", doc.getId(), doc.getRelativePath());
             }
         }
 
@@ -142,12 +153,24 @@ public class DirectoryScannerService {
                 boolean timestampChanged = Math.abs(lastModifiedFs.toEpochMilli() - dbLastMod.toEpochMilli()) > 500;
                 boolean sizeChanged = !Objects.equals(existing.getFileSizeBytes(), fileSize);
                 boolean nameChanged = !Objects.equals(existing.getFileName(), fileName);
+                boolean titleIsJunk = existing.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(existing.getMetaTitle());
 
                 if (!existing.isDeleted() && !timestampChanged && !sizeChanged) {
-                    if (nameChanged) {
+                    if (nameChanged || titleIsJunk) {
                         existing.setFileName(fileName);
+                        if (titleIsJunk) {
+                            existing.setMetaTitle(null);
+                            if ("PDF_INFO".equals(existing.getMetadataSource())) {
+                                existing.setMetadataSource(null);
+                            }
+                            if (existing.getPublicationYear() == null) {
+                                metadataEnrichmentService.extractYearFromPathOrFileName(existing.getRelativePath(), fileName)
+                                        .ifPresent(existing::setPublicationYear);
+                            }
+                        }
                         documentRepository.save(existing);
-                        log.info("Updated cleaned display name for {}: {}", relPath, fileName);
+                        log.info("Updated cleaned display name / purged junk metaTitle for {}: fileName={}, metaTitle={}",
+                                relPath, fileName, existing.getMetaTitle());
                         return IngestionOutcome.UPDATED;
                     }
                     return IngestionOutcome.UNCHANGED;
@@ -270,8 +293,13 @@ public class DirectoryScannerService {
                 );
             }
 
+            String displayName = item.getFileName() != null ? item.getFileName() : segments[segments.length - 1];
+            if (displayName.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+                displayName = displayName.substring(0, displayName.length() - 4);
+            }
+
             currentDir.files.add(new TreeNodeDto(
-                    item.getFileName() != null ? item.getFileName() : segments[segments.length - 1],
+                    displayName,
                     relPath,
                     "file",
                     item.getId(),

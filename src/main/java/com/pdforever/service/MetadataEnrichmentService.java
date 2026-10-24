@@ -78,13 +78,15 @@ public class MetadataEnrichmentService {
     );
 
     private final ObjectMapper objectMapper;
+    private final FileNameCleaner fileNameCleaner;
     private final HttpClient httpClient;
 
     @Value("${library.metadata-lookup-enabled:true}")
     private boolean externalLookupEnabled = true;
 
-    public MetadataEnrichmentService(ObjectMapper objectMapper) {
+    public MetadataEnrichmentService(ObjectMapper objectMapper, FileNameCleaner fileNameCleaner) {
         this.objectMapper = objectMapper;
+        this.fileNameCleaner = fileNameCleaner;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(4))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -190,6 +192,10 @@ public class MetadataEnrichmentService {
 
         // 3. Fallback to path/filename year heuristic and embedded PDF DocumentInformation if not yet enriched
         if (force || doc.getMetadataSource() == null || "PDF_INFO".equals(doc.getMetadataSource()) || "PATH_HEURISTIC".equals(doc.getMetadataSource())) {
+            if (doc.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(doc.getMetaTitle())) {
+                doc.setMetaTitle(null);
+                changed = true;
+            }
             if (embeddedMeta.title() != null && (doc.getMetaTitle() == null || doc.getMetaTitle().isBlank())) {
                 doc.setMetaTitle(embeddedMeta.title());
                 changed = true;
@@ -208,7 +214,7 @@ public class MetadataEnrichmentService {
                 changed = true;
             }
             if (changed) {
-                doc.setMetadataSource(pathOrFileYear != null && embeddedMeta.title() == null ? "PATH_HEURISTIC" : "PDF_INFO");
+                doc.setMetadataSource(pathOrFileYear != null && (doc.getMetaTitle() == null || doc.getMetaTitle().isBlank()) ? "PATH_HEURISTIC" : "PDF_INFO");
                 doc.setMetadataEnrichedAt(Instant.now());
             }
         }
@@ -749,6 +755,16 @@ public class MetadataEnrichmentService {
         if (value == null) return null;
         String trimmed = value.strip();
         if (trimmed.length() < 2) return null;
+        if (fileNameCleaner != null) {
+            if (fileNameCleaner.isJunkOrAdTitle(trimmed)) {
+                return null;
+            }
+            String cleaned = fileNameCleaner.cleanTitle(trimmed);
+            if (cleaned == null || fileNameCleaner.isJunkOrAdTitle(cleaned)) {
+                return null;
+            }
+            return cleaned;
+        }
         String lower = trimmed.toLowerCase();
         if (lower.equals("untitled") || lower.startsWith("microsoft word") || lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) {
             return null;

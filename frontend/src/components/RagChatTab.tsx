@@ -18,6 +18,7 @@ import {
   OllamaStatus,
   RagPassage,
   RagQueryPayload,
+  formatDocTitle,
 } from '../types';
 
 export interface RagChatTabProps {
@@ -338,7 +339,7 @@ export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
             }`}
             title={
               activeDoc
-                ? `Nur im geöffneten Dokument suchen: ${activeDoc.metaTitle || activeDoc.fileName}`
+                ? `Nur im geöffneten Dokument suchen: ${formatDocTitle(activeDoc)}`
                 : 'Kein Dokument geöffnet'
             }
           >
@@ -406,7 +407,7 @@ export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
               </h4>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal">
                 {ragScope === 'current' && activeDoc
-                  ? `Recherchiert gezielt in „${activeDoc.metaTitle || activeDoc.fileName}“ mit Belegstellen [S. X].`
+                  ? `Recherchiert gezielt in „${formatDocTitle(activeDoc)}“ mit Belegstellen [S. X].`
                   : 'Recherchiert passgenau über Lucene-Passagen in deiner PDF-Sammlung.'}
               </p>
             </div>
@@ -574,7 +575,7 @@ export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
             }}
             placeholder={
               ragScope === 'current' && activeDoc
-                ? `Frage an ${activeDoc.metaTitle || activeDoc.fileName}…`
+                ? `Frage an ${formatDocTitle(activeDoc)}…`
                 : 'Frage an die Bibliothek stellen…'
             }
             className="flex-1 resize-none px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-purple-500 leading-normal"

@@ -7,7 +7,7 @@ import {
   ExternalLink,
   FileText,
 } from 'lucide-react';
-import { DocumentItem, ReadingStatus } from '../types';
+import { DocumentItem, ReadingStatus, formatDocTitle } from '../types';
 import { DocumentCover } from './DocumentCover';
 
 export interface DocumentCardProps {
@@ -105,7 +105,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = React.memo(
                   className="font-semibold text-sm text-slate-900 dark:text-slate-100 group-hover:text-blue-500 transition line-clamp-2 break-words"
                   title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
                 >
-                  {doc.metaTitle || doc.fileName}
+                  {formatDocTitle(doc)}
                 </h3>
                 {(doc.authors || doc.publicationYear) && (
                   <p className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">

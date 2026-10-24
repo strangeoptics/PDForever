@@ -66,6 +66,12 @@ export interface DocumentItem {
   noteCount?: number;
 }
 
+export function formatDocTitle(doc: { metaTitle?: string | null; fileName: string }): string {
+  const title = doc.metaTitle?.trim();
+  if (title) return title;
+  return doc.fileName.replace(/\.pdf$/i, '');
+}
+
 export interface DocumentFilterParams {
   path?: string;
   tag?: string;

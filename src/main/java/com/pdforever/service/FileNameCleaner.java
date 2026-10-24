@@ -4,13 +4,17 @@ import com.pdforever.config.LibraryProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Component
 public class FileNameCleaner {
 
     private static final List<String> DEFAULT_REMOVE_LITERALS = List.of(
-            "_de.downmagaz.net"
+            "_de.downmagaz.net",
+            "de.downmagaz.net",
+            "downmagaz.net"
     );
 
     /**
@@ -19,6 +23,18 @@ public class FileNameCleaner {
      */
     private static final List<String> DEFAULT_REMOVE_REGEXES = List.of(
             "(?<=\\b(?:18|19|20)\\d{2})\\s*--.*$"
+    );
+
+    public static final Pattern URL_OR_DOMAIN_PATTERN = Pattern.compile(
+            "^(https?://|www\\.)?[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*\\.(net|com|org|info|biz|ru|to|io|me|cc|ws|online|site|club|vip|top|xyz|de|fr|uk|nl|it|es|eu)(/.*)?$",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Set<String> JUNK_TITLE_KEYWORDS = Set.of(
+            "untitled", "scan", "scanner", "scanned document",
+            "microsoft word", "adobe acrobat", "quarkxpress", "indesign",
+            "coreldraw", "canva", "unknown", "default", "test", "sample",
+            "document", "presentation"
     );
 
     private final List<String> removeLiterals;
@@ -40,6 +56,53 @@ public class FileNameCleaner {
                 .toList();
     }
 
+    public boolean isJunkOrAdTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return true;
+        }
+        String trimmed = title.strip();
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+
+        if (JUNK_TITLE_KEYWORDS.contains(lower)
+                || lower.startsWith("microsoft word")
+                || lower.endsWith(".pdf")
+                || lower.endsWith(".doc")
+                || lower.endsWith(".docx")) {
+            return true;
+        }
+
+        if (URL_OR_DOMAIN_PATTERN.matcher(trimmed).matches()) {
+            return true;
+        }
+
+        for (String literal : removeLiterals) {
+            if (literal != null && !literal.isBlank()) {
+                String cleanLit = literal.replaceAll("^[_\\-\\s.]+", "").strip().toLowerCase(Locale.ROOT);
+                if (!cleanLit.isEmpty() && lower.equals(cleanLit)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public String cleanTitle(String title) {
+        if (title == null || title.isBlank() || isJunkOrAdTitle(title)) {
+            return null;
+        }
+        String cleaned = title.strip();
+        for (String literal : removeLiterals) {
+            if (literal != null && !literal.isBlank()) {
+                cleaned = cleaned.replaceAll("(?i)[_\\-\\s.]*" + Pattern.quote(literal) + "[_\\-\\s.]*", " ");
+            }
+        }
+        for (Pattern pattern : removePatterns) {
+            cleaned = pattern.matcher(cleaned).replaceAll("");
+        }
+        cleaned = cleaned.replaceAll("^[_\\-\\s.]+", "").replaceAll("[_\\-\\s.]+$", "").strip();
+        return isJunkOrAdTitle(cleaned) ? null : cleaned;
+    }
+
     public String cleanFileName(String rawFileName) {
         if (rawFileName == null || rawFileName.isBlank()) {
             return rawFileName;
@@ -48,10 +111,10 @@ public class FileNameCleaner {
         boolean hasPdfExt = rawFileName.toLowerCase().endsWith(".pdf");
         String stem = hasPdfExt ? rawFileName.substring(0, rawFileName.length() - 4) : rawFileName;
 
-        // 1. Remove literal substrings (case-insensitive)
+        // 1. Remove literal substrings (case-insensitive) including leading separators
         for (String literal : removeLiterals) {
             if (literal != null && !literal.isEmpty()) {
-                stem = stem.replaceAll("(?i)" + Pattern.quote(literal), "");
+                stem = stem.replaceAll("(?i)[_\\-\\s.]*" + Pattern.quote(literal), "");
             }
         }
 
@@ -61,7 +124,9 @@ public class FileNameCleaner {
         }
 
         // 3. Clean up trailing spaces or dangling separators
-        stem = stem.strip();
+        stem = stem.replaceAll("[_\\-\\s]+$", "")
+                   .replaceAll("^[_\\-\\s]+", "")
+                   .strip();
 
         if (stem.isEmpty()) {
             return rawFileName;
@@ -70,4 +135,3 @@ public class FileNameCleaner {
         return hasPdfExt ? stem + ".pdf" : stem;
     }
 }
-
