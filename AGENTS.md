@@ -1,11 +1,11 @@
 # AGENTS.md — AI Coding Agent Guidelines for PDForever
 
 ## 1. Project Overview
-**PDForever** is a self-hosted, in-place PDF Document Management and Excerpting System (*Lesezettel*) built for personal libraries of 1,000+ PDFs (books, magazines, academic papers).
+**PDForever** is a self-hosted, in-place Document and eBook Management and Excerpting System (*Lesezettel*) built for personal libraries of 1,000+ files: PDFs (books, magazines, academic papers) as well as eBooks (**EPUB**, **MOBI**, **AZW**, **AZW3**).
 
 ### Core Principle: Strict In-Place Storage
-- PDFs reside in `library.root-dir` (default: `./storage`).
-- **Never move, rename, or modify PDF files on disk.**
+- Document and eBook files reside in `library.root-dir` (default: `./storage`).
+- **Never move, rename, or modify PDF or eBook files on disk.**
 - Display names are cleaned non-destructively at ingestion time via `FileNameCleaner` (configured via `library.clean-remove-literals` and `library.clean-remove-regexes` in `application.yml`).
 - All database and Lucene references store **portable relative paths** using forward slashes (`/`), even on Windows.
 
@@ -18,6 +18,8 @@
 - **Framework**: Spring Boot 3.3.5 (`spring-boot-starter-web`, `spring-boot-starter-data-jpa`, `spring-boot-starter-validation`)
 - **Database**: SQLite (`org.xerial:sqlite-jdbc` + `org.hibernate.community.dialect.SQLiteDialect`) in `WAL` mode (`./data/pdforever.db`)
 - **PDF Processing**: Apache PDFBox 3.0.3 (`Loader.loadPDF`, `PDFTextStripper`, `PDFRenderer`, `PDDocumentOutline`)
+- **EPUB Processing**: Built-in zero-dependency `EpubExtractionService` using Java `ZipFileSystem` and `DocumentBuilder` for container.xml, OPF package manifests, NCX / NAV TOC trees, and cover extraction
+- **MOBI & AZW/AZW3 Processing**: Zero-dependency pure Java `MobiExtractionService` supporting PalmDOC LZ77 decompression, EXTH metadata/cover parsing, MOBI 7 `filepos` TOC extraction, and KF8 (MOBI8 / AZW3) XHTML document boundary splitting with image resource rewriting
 - **Fulltext Search**: Embedded Apache Lucene 9.11.1 (`StandardAnalyzer`, `BM25Similarity`, `UnifiedHighlighter`) in `./data/lucene-index`
 
 ### Frontend (`/frontend`)
@@ -25,6 +27,7 @@
 - **Styling**: Tailwind CSS 3 (dark mode via `.dark` class on `<html>`)
 - **Icons**: `lucide-react`
 - **PDF Rendering**: `pdfjs-dist` (Mozilla PDF.js v4) with HTTP 206 Byte-Range chunked streaming, selectable `TextLayer`, and 4 view modes (`continuous`, `single`, `spread`, `book`)
+- **eBook Rendering**: `EpubViewer.tsx` powered by `epubjs` for EPUB files and a sandboxed HTML streaming reader for MOBI, AZW, and AZW3 files, featuring chapter navigation, text selection popup ("Lesezettel erstellen"), and TOC integration
 
 ---
 
@@ -35,12 +38,13 @@ pdforever/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── DocumentCover.tsx   # Lazy-loaded cover thumbnail (Backend JPEG + PDF.js fallback)
+│   │   │   ├── DocumentCover.tsx   # Lazy-loaded cover thumbnail (Backend JPEG + PDF.js / eBook fallback)
+│   │   │   ├── EpubViewer.tsx      # eBook reader (epubjs for EPUB, sandboxed HTML streaming for MOBI/AZW/AZW3) + text selection popup
 │   │   │   ├── NoteModal.tsx       # Create/edit ReadingNote (Lesezettel) modal
 │   │   │   ├── PdfViewer.tsx       # PDF.js viewer (continuous, single, 2-page spread, book mode) + TocTreeNode + text selection hook
 │   │   │   └── SettingsModal.tsx   # User settings dialog (Cover toggle/layout, theme, reader defaults)
 │   │   ├── App.tsx                 # Main workspace: Horizontally resizable Left Sidebar (Folders, Gliederung/TOC, Tags, Notes),
-│   │   │                           # Continue Reading shelf, Single & Split-View PDF Reader, and Right Inspector
+│   │   │                           # Continue Reading shelf, Single & Split-View PDF & eBook Reader, and Right Inspector
 │   │   ├── api.ts                  # Typed REST client for /api/*
 │   │   └── types.ts                # Shared TypeScript interfaces (DocumentItem, TocItem, ReadingStatus, ReaderViewMode, etc.)
 │   ├── package.json
@@ -53,16 +57,20 @@ pdforever/
 │   │   │   ├── domain/             # JPA Entities: Document, Tag, ReadingNote
 │   │   │   ├── dto/                # Java records for REST requests/responses (DocumentDto, TocItemDto, UpdateMetadataRequest, etc.)
 │   │   │   ├── repository/         # Spring Data JPA repositories
-│   │   │   └── service/            # DirectoryScannerService, FileWatcherService, PdfExtractionService, MetadataEnrichmentService,
-│   │   │                           # LuceneIndexService, SearchService, LibraryManagementService, FileNameCleaner
+│   │   │   └── service/            # DirectoryScannerService, FileWatcherService, PdfExtractionService, EpubExtractionService,
+│   │   │                           # MobiExtractionService, MetadataEnrichmentService, LuceneIndexService, SearchService,
+│   │   │                           # LibraryManagementService, FileNameCleaner
 │   │   └── resources/
 │   │       └── application.yml     # App, SQLite, and library.* configuration
 │   └── test/
 │       └── java/com/pdforever/
-│           └── IngestionAndSearchIntegrationTest.java
+│           ├── IngestionAndSearchIntegrationTest.java
+│           └── service/
+│               ├── EpubExtractionServiceTest.java
+│               └── MobiExtractionServiceTest.java
 ├── analysis/                       # Git-ignored feature & architecture analysis documents
 ├── data/                           # Git-ignored runtime data (pdforever.db, lucene-index/, covers/)
-└── storage/                        # Git-ignored in-place PDF library root
+└── storage/                        # Git-ignored in-place document and eBook library root
 ```
 
 ---
@@ -128,8 +136,8 @@ Run from the repository root:
    - External lookups are non-blocking and queued via `AsyncMetadataEnrichmentService` on a Java 21 Virtual Thread with rate limiting.
    - Endpoints: `POST /api/documents/{id}/enrich`, `PUT /api/documents/{id}/metadata`, and `POST /api/documents/enrich-all?force=...`.
 9. **Faceted Discovery & Filtered Lucene Search (`DocumentFilterCriteria` & `DocumentFacetsDto`)**:
-   - `GET /api/documents` and `GET /api/search` accept faceted filter parameters: `path`, `tag` (single or comma-separated multi-tag), `status`, `minPages`, `maxPages`, `hasNotes`, `noteQuery` ("PDFs with notes about topic X"), `modifiedAfter`, `modifiedBefore`, `yearFrom`, `yearTo`, `hasMetadata`, `sortBy`, and `sortDir`.
-   - `GET /api/documents/facets` computes live facet counts (status counts, `withNotesCount`, `totalNotesCount`, `withMetadataCount`, page buckets `1–20` / `21–100` / `101+`, min/max pages and publication years, and per-tag document counts).
+   - `GET /api/documents` and `GET /api/search` accept faceted filter parameters: `format` (`PDF`, `EPUB`, `MOBI`, `AZW`), `path`, `tag` (single or comma-separated multi-tag), `status`, `minPages`, `maxPages`, `hasNotes`, `noteQuery` ("PDFs/eBooks with notes about topic X"), `modifiedAfter`, `modifiedBefore`, `yearFrom`, `yearTo`, `hasMetadata`, `sortBy`, and `sortDir`.
+   - `GET /api/documents/facets` computes live facet counts (format counts `pdfCount`, `epubCount`, `mobiCount`, status counts, `withNotesCount`, `totalNotesCount`, `withMetadataCount`, page/chapter buckets `1–20` / `21–100` / `101+`, min/max pages and publication years, and per-tag document counts).
    - In `SearchService`, active facets restrict fulltext Lucene queries via `TermInSetQuery(FIELD_DOC_ID, ...)` with `BooleanClause.Occur.FILTER` while preserving `UnifiedHighlighter` snippet highlighting on `FIELD_CONTENT`.
 10. **Local RAG & LLM Provider Abstraction (`OllamaRagService`, `RagController` & `LlmClient`)**:
    - Pure, strictly local, optional and non-blocking: The application remains 100% functional without an LLM running.
@@ -138,6 +146,19 @@ Run from the repository root:
    - Default model: `qwen2.5:14b` (~9 GB VRAM, leaving ~3 GB for 16k context on a 12 GB GPU).
    - Endpoints: `GET /api/rag/status`, `POST /api/rag/ask`, and `POST /api/rag/stream` (SSE token & passage streaming via Java 21 Virtual Threads).
    - When the LLM backend is offline or fails, retrieval passages are still returned gracefully with clear status information without throwing unhandled errors.
+11. **eBook Ingestion & Multi-Format Architecture (EPUB, MOBI, AZW, AZW3)**:
+   - **Zero External Dependencies**: Built entirely with standard Java 21 APIs (`EpubExtractionService`, `MobiExtractionService`) without requiring Calibre, Python, or native C binaries (`libmobi`).
+   - **Non-Destructive In-Place Storage**: eBook files are never altered or moved. Extracted cover thumbnails, chapter HTMLs, and metadata are parsed in-memory and cached in SQLite/Lucene.
+   - **Cover Generation**: Cover images are extracted from EPUB manifests, MOBI EXTH record 201, or parsed image records, scaled to max 420px width JPEG and cached at `./data/covers/{id}.jpg`.
+   - **Page/Chapter Lucene Indexing**: Each chapter is indexed as an individual Lucene page (`FIELD_DOC_ID`, `FIELD_PAGE_NUMBER`, `FIELD_CONTENT`), making fulltext search, highlighter snippets, and RAG retrieval format-agnostic across both PDFs and eBooks.
+   - **Format-Specific Extraction Rules**:
+     - **EPUB**: Parsed via `ZipFileSystem`, extracting metadata and spine order from `content.opf`, and resolving hierarchical outlines from NCX (`toc.ncx`) or EPUB3 NAV (`nav.xhtml`).
+     - **MOBI 7**: Pure Java PalmDOC LZ77 decompression with trailer stripping, EXTH headers, and `filepos` offset Table of Contents slicing (`splitByFileposToc`).
+     - **KF8 / AZW3 (MOBI 8)**: Concatenated XHTML/XML document boundary segmentation (`splitByKf8Documents`), extracting `<title>` and heading metadata, and automatically merging consecutive pieces sharing identical chapter titles.
+   - **Endpoints**:
+     - `GET /api/documents/{id}/raw`: Streams EPUB, MOBI, AZW, and PDF files with HTTP 206 Byte-Range streaming.
+     - `GET /api/documents/{id}/mobi/chapters/{chapter}`: Serves rendered chapter HTML with image URLs rewritten.
+     - `GET /api/documents/{id}/mobi/resource?index=...`: Streams extracted embedded images for MOBI and AZW books.
 
 ### Frontend Rules
 1. **Build Artifacts**:
@@ -156,4 +177,8 @@ Run from the repository root:
    - Sidebar tab `rag` offers conversational Q&A against the active document or filtered library.
    - Citations matching `[S. X]` or `[Titel, S. X]` are parsed into clickable jump buttons that navigate directly to that page in `PdfViewer` via `handleOpenDocument(docId, pageNumber)`.
    - Includes an expandable source viewer for transparent Lucene passage inspection and an offline status banner with copyable command `ollama run qwen2.5:14b`.
+6. **Unified eBook Reading & Annotation (`EpubViewer.tsx`)**:
+   - Seamlessly renders `.epub` via `epubjs` and `.mobi`, `.azw`, `.azw3` via sandboxed HTML iframe streaming with full responsive font and line height customization.
+   - **Text Selection & Reading Notes**: Text selection in both EPUB and MOBI/AZW readers triggers the interactive popup ("Lesezettel erstellen"), pre-filling `NoteModal` with selected quotes and chapter references.
+   - **TOC & Progress Sync**: Automatically synchronizes chapter navigation with the left sidebar `Gliederung` tab and persists reading progress (`PUT /api/documents/{id}/progress`).
 
