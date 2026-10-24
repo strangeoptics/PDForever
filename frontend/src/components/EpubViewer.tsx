@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   Columns,
@@ -8,7 +7,6 @@ import {
   Minimize2,
   PanelRightClose,
   PanelRightOpen,
-  Type,
   X,
   Highlighter,
   Loader2,
@@ -51,10 +49,49 @@ interface EpubViewerProps {
 type ReaderTheme = 'dark' | 'sepia' | 'light';
 type FontFamily = 'serif' | 'sans' | 'mono';
 
-const THEME_STYLES: Record<ReaderTheme, { bg: string; text: string; name: string }> = {
-  dark: { bg: '#0f172a', text: '#e2e8f0', name: 'Dunkel' },
-  sepia: { bg: '#fbf0d9', text: '#433422', name: 'Sepia' },
-  light: { bg: '#ffffff', text: '#1e293b', name: 'Hell' },
+const THEME_STYLES: Record<
+  ReaderTheme,
+  {
+    bg: string;
+    text: string;
+    name: string;
+    highlightBg: string;
+    highlightBorder: string;
+    highlightHover: string;
+    highlightActiveBg: string;
+    highlightRing: string;
+  }
+> = {
+  dark: {
+    bg: '#0f172a',
+    text: '#e2e8f0',
+    name: 'Dunkel',
+    highlightBg: 'rgba(245, 158, 11, 0.28)',
+    highlightBorder: '#f59e0b',
+    highlightHover: 'rgba(245, 158, 11, 0.45)',
+    highlightActiveBg: 'rgba(245, 158, 11, 0.65)',
+    highlightRing: 'rgba(245, 158, 11, 0.6)',
+  },
+  sepia: {
+    bg: '#fbf0d9',
+    text: '#433422',
+    name: 'Sepia',
+    highlightBg: 'rgba(217, 119, 6, 0.25)',
+    highlightBorder: '#d97706',
+    highlightHover: 'rgba(217, 119, 6, 0.42)',
+    highlightActiveBg: 'rgba(217, 119, 6, 0.55)',
+    highlightRing: 'rgba(217, 119, 6, 0.5)',
+  },
+  light: {
+    bg: '#ffffff',
+    text: '#1e293b',
+    name: 'Hell',
+    highlightBg: 'rgba(251, 191, 36, 0.45)',
+    highlightBorder: '#f59e0b',
+    highlightHover: 'rgba(251, 191, 36, 0.65)',
+    highlightActiveBg: 'rgba(245, 158, 11, 0.7)',
+    highlightRing: 'rgba(245, 158, 11, 0.5)',
+  },
 };
 
 const FONT_FAMILIES: Record<FontFamily, { css: string; name: string }> = {
@@ -105,6 +142,8 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
   } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pendingJumpNoteIdRef = useRef<string | null>(null);
 
   // Load chapters list on mount or document switch
   useEffect(() => {
@@ -136,8 +175,8 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         if (!active) return;
         setChapterHtml(html);
         setLoading(false);
-        // Scroll to top of reading pane
-        if (containerRef.current) {
+        // Scroll to top of reading pane if not jumping to a specific note
+        if (containerRef.current && !pendingJumpNoteIdRef.current) {
           containerRef.current.scrollTop = 0;
         }
       })
@@ -152,15 +191,6 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     };
   }, [docItem.id, currentChapter]);
 
-  // React to targetJump (TOC, Notes, Search Results)
-  useEffect(() => {
-    if (targetJump && targetJump.page >= 1) {
-      if (targetJump.page !== currentChapter) {
-        changeChapter(targetJump.page);
-      }
-    }
-  }, [targetJump]);
-
   const changeChapter = useCallback((newIndex: number) => {
     if (newIndex < 1) return;
     const max = Math.max(1, chapters.length || docItem.pageCount || 1);
@@ -174,6 +204,179 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
       });
     }
   }, [chapters.length, docItem.id, docItem.pageCount, onPageChange, onUpdateProgress]);
+
+  // Notes belonging to this chapter
+  const currentChapterNotes = useMemo(() => {
+    return notes.filter((n) => n.pageNumber === currentChapter);
+  }, [notes, currentChapter]);
+
+  // Pulse animation helper for a highlighted element
+  const pulseHighlight = useCallback((el: HTMLElement) => {
+    el.classList.remove('epub-highlight-active');
+    // Force DOM reflow to restart animation if already active
+    void el.offsetWidth;
+    el.classList.add('epub-highlight-active');
+    setTimeout(() => {
+      el.classList.remove('epub-highlight-active');
+    }, 2200);
+  }, []);
+
+  // Scroll to a specific note's highlighted quote
+  const scrollToNote = useCallback((noteId: string) => {
+    const root = contentRef.current;
+    if (!root) return;
+    const mark = root.querySelector(`mark.epub-note-highlight[data-note-id="${noteId}"]`) as HTMLElement | null;
+    if (mark) {
+      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      pulseHighlight(mark);
+      pendingJumpNoteIdRef.current = null;
+    }
+  }, [pulseHighlight]);
+
+  // Apply in-text highlights to the chapter DOM
+  const applyHighlights = useCallback(() => {
+    const root = contentRef.current;
+    if (!root || !currentChapterNotes.length) return;
+
+    // Remove existing highlights first to avoid duplicate wrappers
+    const existingMarks = root.querySelectorAll('mark.epub-note-highlight');
+    existingMarks.forEach((mark) => {
+      const parent = mark.parentNode;
+      while (mark.firstChild) {
+        parent?.insertBefore(mark.firstChild, mark);
+      }
+      parent?.removeChild(mark);
+    });
+
+    // Helper to find and wrap text occurrence
+    const wrapOccurrence = (quote: string, note: ReadingNote) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      const textNodes: Text[] = [];
+      let cur: Node | null;
+      while ((cur = walker.nextNode())) {
+        if (cur.nodeValue && cur.nodeValue.length > 0) {
+          textNodes.push(cur as Text);
+        }
+      }
+      if (!textNodes.length) return;
+
+      let fullText = '';
+      const intervals: { node: Text; start: number; end: number }[] = [];
+      for (const tn of textNodes) {
+        const val = tn.nodeValue || '';
+        const start = fullText.length;
+        fullText += val;
+        intervals.push({ node: tn, start, end: fullText.length });
+      }
+
+      let matchIndex = fullText.indexOf(quote);
+      let matchLength = quote.length;
+
+      if (matchIndex === -1) {
+        matchIndex = fullText.toLowerCase().indexOf(quote.toLowerCase());
+      }
+
+      if (matchIndex === -1) {
+        const escaped = quote
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\s+/g, '\\s+');
+        try {
+          const regex = new RegExp(escaped, 'i');
+          const m = regex.exec(fullText);
+          if (m) {
+            matchIndex = m.index;
+            matchLength = m[0].length;
+          }
+        } catch {
+          // ignore regex fallback failure
+        }
+      }
+
+      if (matchIndex === -1) return;
+
+      const matchEnd = matchIndex + matchLength;
+      const range = document.createRange();
+      let startSet = false;
+      let endSet = false;
+
+      for (const { node, start, end } of intervals) {
+        if (!startSet && matchIndex >= start && matchIndex < end) {
+          range.setStart(node, matchIndex - start);
+          startSet = true;
+        }
+        if (startSet && matchEnd <= end) {
+          range.setEnd(node, matchEnd - start);
+          endSet = true;
+          break;
+        }
+      }
+
+      if (startSet && endSet) {
+        const mark = document.createElement('mark');
+        mark.className = 'epub-note-highlight';
+        mark.setAttribute('data-note-id', note.id);
+        mark.setAttribute('tabindex', '0');
+        mark.setAttribute(
+          'title',
+          note.noteMarkdown ? `Lesezettel: ${note.noteMarkdown.slice(0, 100)}` : 'Lesezettel anzeigen'
+        );
+        try {
+          range.surroundContents(mark);
+        } catch {
+          try {
+            const frag = range.extractContents();
+            mark.appendChild(frag);
+            range.insertNode(mark);
+          } catch (err) {
+            console.debug('Failed to wrap highlight mark:', err);
+          }
+        }
+      }
+    };
+
+    // Apply highlights in order of current chapter notes
+    currentChapterNotes.forEach((note) => {
+      const quote = note.selectedText?.trim();
+      if (quote && quote.length >= 2) {
+        wrapOccurrence(quote, note);
+      }
+    });
+
+    // If there is a pending jump note, scroll to it now
+    if (pendingJumpNoteIdRef.current) {
+      setTimeout(() => {
+        if (pendingJumpNoteIdRef.current) {
+          scrollToNote(pendingJumpNoteIdRef.current);
+        }
+      }, 100);
+    }
+  }, [currentChapterNotes, scrollToNote]);
+
+  // Re-run highlighting whenever chapter HTML changes or chapter notes change
+  useEffect(() => {
+    if (!loading && chapterHtml) {
+      applyHighlights();
+    }
+  }, [loading, chapterHtml, applyHighlights]);
+
+  // React to targetJump (TOC, Notes, Search Results)
+  useEffect(() => {
+    if (!targetJump) return;
+    const targetPage = targetJump.page >= 1 ? targetJump.page : 1;
+
+    if (targetJump.noteId) {
+      pendingJumpNoteIdRef.current = targetJump.noteId;
+    }
+
+    if (targetPage !== currentChapter) {
+      changeChapter(targetPage);
+    } else if (targetJump.noteId) {
+      setTimeout(() => {
+        scrollToNote(targetJump.noteId!);
+      }, 100);
+    }
+  }, [targetJump, currentChapter, changeChapter, scrollToNote]);
 
   // Keyboard navigation (ArrowLeft / ArrowRight)
   useEffect(() => {
@@ -190,6 +393,21 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [changeChapter, currentChapter]);
+
+  // Handle clicking on an in-text highlight
+  const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = (e.target as HTMLElement).closest('mark.epub-note-highlight');
+    if (target) {
+      const noteId = target.getAttribute('data-note-id');
+      if (noteId) {
+        const found = notes.find((n) => n.id === noteId);
+        if (found) {
+          onSelectNote(found);
+          pulseHighlight(target as HTMLElement);
+        }
+      }
+    }
+  };
 
   // Text selection tracking
   const handleMouseUp = () => {
@@ -236,11 +454,6 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     return found ? found.title : `Kapitel ${currentChapter}`;
   }, [chapters, currentChapter]);
 
-  // Notes for this chapter
-  const currentChapterNotes = useMemo(() => {
-    return notes.filter((n) => n.pageNumber === currentChapter);
-  }, [notes, currentChapter]);
-
   const changeFontSize = (delta: number) => {
     setFontSize((prev) => {
       const next = Math.max(12, Math.min(32, prev + delta));
@@ -264,6 +477,35 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
 
   return (
     <div className="relative flex flex-col h-full w-full overflow-hidden select-text bg-slate-900 text-slate-100">
+      {/* Scoped CSS for in-text highlights and pulse animations */}
+      <style>{`
+        mark.epub-note-highlight {
+          background-color: ${themeStyle.highlightBg};
+          border-bottom: 2px solid ${themeStyle.highlightBorder};
+          color: inherit;
+          border-radius: 2px;
+          padding: 1px 3px;
+          cursor: pointer;
+          transition: background-color 0.2s ease, box-shadow 0.2s ease;
+          position: relative;
+        }
+        mark.epub-note-highlight:hover {
+          background-color: ${themeStyle.highlightHover};
+          box-shadow: 0 0 6px ${themeStyle.highlightRing};
+        }
+        mark.epub-note-highlight.epub-highlight-active {
+          background-color: ${themeStyle.highlightActiveBg} !important;
+          box-shadow: 0 0 0 4px ${themeStyle.highlightRing} !important;
+          animation: epub-pulse-glow 2s ease-in-out;
+        }
+        @keyframes epub-pulse-glow {
+          0% { transform: scale(1); box-shadow: 0 0 0 0 ${themeStyle.highlightRing}; }
+          35% { transform: scale(1.025); box-shadow: 0 0 0 6px ${themeStyle.highlightRing}; }
+          70% { transform: scale(1.01); box-shadow: 0 0 0 3px ${themeStyle.highlightRing}; }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+        }
+      `}</style>
+
       {/* Top Toolbar */}
       <div className="flex-none flex items-center justify-between px-3 py-2 border-b border-slate-700/60 bg-slate-800/90 backdrop-blur-sm z-20 text-xs gap-2">
         {/* Left: Badge, Title & Chapter Info */}
@@ -497,28 +739,36 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         <div className="max-w-3xl mx-auto px-6 py-10 min-h-full">
           {/* Notes badge banner if current chapter has notes */}
           {currentChapterNotes.length > 0 && (
-            <div className="mb-6 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs flex items-center justify-between text-amber-300">
-              <span className="flex items-center gap-1.5 font-medium">
-                <Highlighter size={14} />
-                {currentChapterNotes.length} Lesezettel in diesem Kapitel
-              </span>
-              <div className="flex items-center gap-1">
-                {currentChapterNotes.slice(0, 3).map((n) => (
+            <div className="mb-6 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs flex flex-wrap items-center justify-between gap-2 text-amber-300">
+              <div className="flex items-center gap-2 font-medium">
+                <Highlighter size={14} className="text-amber-400" />
+                <span>
+                  {currentChapterNotes.length} {currentChapterNotes.length === 1 ? 'Lesezettel' : 'Lesezettel'} in diesem Kapitel
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {currentChapterNotes.map((n, idx) => (
                   <button
                     key={n.id}
-                    onClick={() => onSelectNote(n)}
-                    className="truncate max-w-[120px] bg-amber-500/20 hover:bg-amber-500/30 px-1.5 py-0.5 rounded text-[11px] text-amber-200"
-                    title={n.selectedText || n.noteMarkdown}
+                    onClick={() => {
+                      scrollToNote(n.id);
+                      onSelectNote(n);
+                    }}
+                    className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/35 px-2 py-1 rounded-md text-[11px] text-amber-200 transition-colors"
+                    title={`Zu Zitat springen: "${n.selectedText || n.noteMarkdown}"`}
                   >
-                    "{n.selectedText?.slice(0, 15)}..."
+                    <span className="font-mono text-[10px] text-amber-400/80">#{idx + 1}</span>
+                    <span className="truncate max-w-[140px]">"{n.selectedText || n.noteMarkdown}"</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* HTML Render Container */}
+          {/* HTML Render Container with in-text highlights */}
           <div
+            ref={contentRef}
+            onClick={handleContentClick}
             className="epub-reader-content prose max-w-none transition-all duration-150"
             style={{
               fontSize: `${fontSize}px`,
@@ -556,4 +806,3 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     </div>
   );
 };
-
