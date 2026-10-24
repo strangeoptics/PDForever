@@ -1,13 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import { FileText, Loader2 } from 'lucide-react';
 import { DocumentItem } from '../types';
 import { api } from '../api';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url
-).toString();
 
 const fallbackCoverCache = new Map<string, string>();
 
@@ -45,7 +39,7 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
     return () => observer.disconnect();
   }, []);
 
-  // Client-side PDF.js fallback if backend cover endpoint fails or is unavailable
+  // Client-side PDF.js fallback ONLY if backend cover endpoint fails or is unavailable
   useEffect(() => {
     if (!isVisible || !backendFailed || fallbackDataUrl || fallbackFailed) return;
 
@@ -56,16 +50,27 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
     }
 
     let cancelled = false;
-    const streamUrl = api.getStreamUrl(doc.id);
-    const loadingTask = pdfjsLib.getDocument({
-      url: streamUrl,
-      rangeChunkSize: 256 * 1024,
-      disableAutoFetch: true,
-      disableStream: false,
-    });
+    let loadingTaskRef: { destroy: () => void } | null = null;
 
-    loadingTask.promise
-      .then(async (pdf) => {
+    import('pdfjs-dist').then(async (pdfjsLib) => {
+      if (cancelled) return;
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/build/pdf.worker.min.mjs',
+        import.meta.url
+      ).toString();
+
+      const streamUrl = api.getStreamUrl(doc.id);
+      const loadingTask = pdfjsLib.getDocument({
+        url: streamUrl,
+        rangeChunkSize: 256 * 1024,
+        disableAutoFetch: true,
+        disableStream: false,
+      });
+      loadingTaskRef = loadingTask;
+
+      try {
+        const pdf = await loadingTask.promise;
         if (cancelled) {
           pdf.destroy();
           return;
@@ -93,16 +98,18 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
         } finally {
           pdf.destroy();
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setFallbackFailed(true);
         }
-      });
+      }
+    });
 
     return () => {
       cancelled = true;
-      loadingTask.destroy();
+      if (loadingTaskRef) {
+        loadingTaskRef.destroy();
+      }
     };
   }, [isVisible, backendFailed, fallbackDataUrl, fallbackFailed, doc.id]);
 
@@ -113,40 +120,44 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
       ref={containerRef}
       className={`relative overflow-hidden bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center select-none ${className}`}
     >
-      {/* Loading / Fallback Placeholder */}
-      {(!imageLoaded || (backendFailed && fallbackFailed)) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-slate-400 dark:text-slate-500 p-2">
-          {isVisible && !fallbackFailed ? (
-            <Loader2 className="w-5 h-5 animate-spin text-blue-500/70" />
-          ) : (
-            <FileText className="w-7 h-7 stroke-1" />
-          )}
-        </div>
-      )}
-
-      {/* Primary: Backend rendered & cached cover image */}
+      {/* 1. Try backend cached JPEG thumbnail first */}
       {isVisible && !backendFailed && (
         <img
           src={coverUrl}
-          alt={`Cover of ${doc.fileName}`}
+          alt={doc.fileName}
           loading="lazy"
+          decoding="async"
           onLoad={() => setImageLoaded(true)}
           onError={() => setBackendFailed(true)}
-          className={`w-full h-full object-cover object-top transition-opacity duration-300 ${
+          className={`w-full h-full object-cover transition-opacity duration-300 ${
             imageLoaded ? 'opacity-100' : 'opacity-0'
           }`}
         />
       )}
 
-      {/* Secondary Fallback: PDF.js rendered cover image */}
-      {isVisible && backendFailed && fallbackDataUrl && (
+      {/* 2. Client-side PDF.js fallback if backend failed */}
+      {isVisible && backendFailed && fallbackDataUrl && !fallbackFailed && (
         <img
           src={fallbackDataUrl}
-          alt={`Cover of ${doc.fileName}`}
-          className="w-full h-full object-cover object-top transition-opacity duration-300 opacity-100"
+          alt={doc.fileName}
+          className="w-full h-full object-cover animate-in fade-in duration-200"
         />
+      )}
+
+      {/* Placeholder / Spinner while loading */}
+      {isVisible && !imageLoaded && !fallbackFailed && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80 dark:bg-slate-800/80">
+          <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+        </div>
+      )}
+
+      {/* 3. Generic fallback icon if both backend & client rendering failed */}
+      {(!isVisible || fallbackFailed || (backendFailed && !fallbackDataUrl && !imageLoaded)) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-1 p-2 text-center">
+          <FileText className="w-8 h-8 stroke-1" />
+          <span className="text-[10px] font-mono line-clamp-1">{doc.fileName}</span>
+        </div>
       )}
     </div>
   );
 };
-

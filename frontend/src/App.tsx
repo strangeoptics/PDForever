@@ -29,7 +29,7 @@ import {
 import { LeftSidebar } from './components/LeftSidebar';
 import { useSidebarResize } from './hooks/useSidebarResize';
 import { useDocumentFilters } from './hooks/useDocumentFilters';
-import { DocumentCard } from './components/DocumentCard';
+import { VirtualizedDocumentGrid } from './components/VirtualizedDocumentGrid';
 import { FacetedFilterBar } from './components/FacetedFilterBar';
 import { InstantSearchBar } from './components/InstantSearchBar';
 import { ContinueReadingShelf } from './components/ContinueReadingShelf';
@@ -94,6 +94,9 @@ export const App: React.FC = () => {
   const [recentDocuments, setRecentDocuments] = useState<DocumentItem[]>([]);
   const [allDocumentsList, setAllDocumentsList] = useState<DocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState<number>(0);
+  const [docPageNumber, setDocPageNumber] = useState<number>(0);
+  const [hasMoreDocuments, setHasMoreDocuments] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [globalNotes, setGlobalNotes] = useState<ReadingNote[]>([]);
   const [docNotes, setDocNotes] = useState<ReadingNote[]>([]);
@@ -218,6 +221,8 @@ export const App: React.FC = () => {
       setTree(treeData);
       setTags(tagsData);
       setDocuments(docsPage.content);
+      setDocPageNumber(0);
+      setHasMoreDocuments(docsPage.number + 1 < docsPage.totalPages);
       setFacets(facetsData);
       setRecentDocuments(recentDocs);
       setAllDocumentsList(allDocsPage.content);
@@ -231,6 +236,25 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadLibraryData();
   }, [loadLibraryData]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore || !hasMoreDocuments) return;
+    setIsLoadingMore(true);
+    try {
+      const nextPage = docPageNumber + 1;
+      const res = await api.getDocuments({
+        ...currentFilterParams,
+        page: nextPage,
+      });
+      setDocuments((prev) => [...prev, ...res.content]);
+      setDocPageNumber(nextPage);
+      setHasMoreDocuments(res.number + 1 < res.totalPages);
+    } catch (err) {
+      console.error("Failed to load more documents:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, hasMoreDocuments, docPageNumber, currentFilterParams]);
 
   // Load notes and TOC outline when active document changes
   useEffect(() => {
@@ -750,18 +774,16 @@ export const App: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {documents.map((doc) => (
-                    <DocumentCard
-                      key={doc.id}
-                      document={doc}
-                      coverCacheVersion={coverCacheVersion}
-                      showCovers={settings.showCovers}
-                      coverLayout={settings.coverLayout}
-                      onClick={() => handleOpenDocument(doc.id)}
-                    />
-                  ))}
-                </div>
+                <VirtualizedDocumentGrid
+                  documents={documents}
+                  coverCacheVersion={coverCacheVersion}
+                  showCovers={settings.showCovers}
+                  coverLayout={settings.coverLayout}
+                  onClickDocument={handleOpenDocument}
+                  hasMore={hasMoreDocuments}
+                  isLoadingMore={isLoadingMore}
+                  onLoadMore={handleLoadMore}
+                />
               )}
             </div>
           )}
