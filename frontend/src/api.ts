@@ -44,6 +44,7 @@ export const api = {
     if (params.path) sp.set('path', params.path);
     if (params.tag) sp.set('tag', params.tag);
     if (params.status) sp.set('status', params.status);
+    if (params.format) sp.set('format', params.format);
     if (params.minPages != null) sp.set('minPages', String(params.minPages));
     if (params.maxPages != null) sp.set('maxPages', String(params.maxPages));
     if (params.hasNotes != null) sp.set('hasNotes', String(params.hasNotes));
@@ -152,6 +153,7 @@ export const api = {
       if (filters.path) sp.set('path', filters.path);
       if (filters.tag) sp.set('tag', filters.tag);
       if (filters.status) sp.set('status', filters.status);
+      if (filters.format) sp.set('format', filters.format);
       if (filters.minPages != null) sp.set('minPages', String(filters.minPages));
       if (filters.maxPages != null) sp.set('maxPages', String(filters.maxPages));
       if (filters.hasNotes != null) sp.set('hasNotes', String(filters.hasNotes));

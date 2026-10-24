@@ -7,6 +7,7 @@ export interface ParsedUrlState {
   folder: string | null;
   tag: string | null;
   status: string | null;
+  format: string | null;
   tab: 'folders' | 'outline' | 'tags' | 'notes' | 'rag' | null;
   noteId: string | null;
 }
@@ -20,6 +21,7 @@ export function parseUrlState(): ParsedUrlState {
       folder: null,
       tag: null,
       status: null,
+      format: null,
       tab: null,
       noteId: null,
     };
@@ -33,6 +35,7 @@ export function parseUrlState(): ParsedUrlState {
   const folder = params.get('folder');
   const tag = params.get('tag');
   const status = params.get('status');
+  const format = params.get('format');
   const tabRaw = params.get('tab');
   const validTabs: Array<'folders' | 'outline' | 'tags' | 'notes' | 'rag'> = [
     'folders',
@@ -53,6 +56,7 @@ export function parseUrlState(): ParsedUrlState {
     folder,
     tag,
     status,
+    format,
     tab,
     noteId,
   };
@@ -65,6 +69,7 @@ export interface UrlSyncParams {
   folder: string;
   tag: string;
   status: string;
+  format?: string;
   tab: 'folders' | 'outline' | 'tags' | 'notes' | 'rag';
   noteId?: string | null;
 }
@@ -90,7 +95,7 @@ export function useUrlState({
   }, [onPopStateNavigation]);
 
   const syncUrl = useCallback(
-    ({ docId, page, splitDocId, folder, tag, status, tab, noteId }: UrlSyncParams) => {
+    ({ docId, page, splitDocId, folder, tag, status, format, tab, noteId }: UrlSyncParams) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -114,6 +119,7 @@ export function useUrlState({
           if (folder) sp.set('folder', folder);
           if (tag) sp.set('tag', tag);
           if (status) sp.set('status', status);
+          if (format) sp.set('format', format);
         }
 
         if (tab && tab !== 'folders') {

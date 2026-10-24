@@ -170,6 +170,36 @@ class DatabasePaginationAndFilteringTest {
         assertThat(allFacets.maxPageCount()).isEqualTo(500);
         assertThat(allFacets.minPublicationYear()).isEqualTo(2006);
         assertThat(allFacets.maxPublicationYear()).isEqualTo(2023);
+        assertThat(allFacets.pdfCount()).isEqualTo(6);
+        assertThat(allFacets.epubCount()).isEqualTo(0);
+
+        // Test Format filtering
+        DocumentFilterCriteria pdfFilter = new DocumentFilterCriteria(
+                null, null, null, null, null, null, null, null, null, null, null, null, "fileName", "asc", "PDF"
+        );
+        Page<DocumentDto> pdfs = libraryService.getDocuments(pdfFilter, 0, 10);
+        assertThat(pdfs.getTotalElements()).isEqualTo(6);
+
+        DocumentFilterCriteria epubFilter = new DocumentFilterCriteria(
+                null, null, null, null, null, null, null, null, null, null, null, null, "fileName", "asc", "EPUB"
+        );
+        Page<DocumentDto> epubs = libraryService.getDocuments(epubFilter, 0, 10);
+        assertThat(epubs.getTotalElements()).isEqualTo(0);
+
+        // Switch doc6 format to EPUB and verify facets & filter
+        doc6.setFormat("EPUB");
+        documentRepository.save(doc6);
+        DocumentFacetsDto updatedFacets = libraryService.getDocumentFacets(null);
+        assertThat(updatedFacets.pdfCount()).isEqualTo(5);
+        assertThat(updatedFacets.epubCount()).isEqualTo(1);
+
+        Page<DocumentDto> epubsAfter = libraryService.getDocuments(epubFilter, 0, 10);
+        assertThat(epubsAfter.getTotalElements()).isEqualTo(1);
+        assertThat(epubsAfter.getContent().get(0).id()).isEqualTo(doc6.getId());
+
+        // Restore doc6 for remaining checks
+        doc6.setFormat("PDF");
+        documentRepository.save(doc6);
 
         // Path-scoped facets for "Frontend"
         DocumentFacetsDto frontendFacets = libraryService.getDocumentFacets("Frontend");
@@ -207,6 +237,7 @@ class DatabasePaginationAndFilteringTest {
         doc.setPageCount(pages);
         doc.setPublicationYear(year);
         doc.setReadingStatus(status);
+        doc.setFormat(relPath.toLowerCase().endsWith(".epub") ? "EPUB" : "PDF");
         doc.setLastModifiedFs(Instant.now());
         doc.setCreatedAt(Instant.now());
         doc.setDeleted(false);

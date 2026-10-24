@@ -90,6 +90,7 @@ export interface DocumentFilterParams {
   path?: string;
   tag?: string;
   status?: string;
+  format?: string;
   minPages?: number | null;
   maxPages?: number | null;
   hasNotes?: boolean | null;
@@ -127,6 +128,8 @@ export interface DocumentFacets {
   maxPageCount: number;
   minPublicationYear: number | null;
   maxPublicationYear: number | null;
+  pdfCount?: number;
+  epubCount?: number;
   tags: TagFacet[];
 }
 
@@ -183,6 +186,7 @@ export interface SearchResultGroup {
   title: string;
   relPath: string;
   matches: SearchPageMatch[];
+  format?: string;
 }
 
 export interface AppSettings {

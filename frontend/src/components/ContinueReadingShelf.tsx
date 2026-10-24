@@ -1,6 +1,6 @@
 import React from 'react';
 import { Clock, Play } from 'lucide-react';
-import { DocumentItem, formatDocTitle } from '../types';
+import { DocumentItem, formatDocTitle, isEpubDocument } from '../types';
 
 interface ContinueReadingShelfProps {
   recentDocuments: DocumentItem[];
@@ -23,6 +23,9 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.m
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {recentDocuments.slice(0, 3).map((doc) => {
+          const isEpub = isEpubDocument(doc);
+          const pageOrChapter = isEpub ? `Kap. ${doc.lastReadPage || 1}` : `S. ${doc.lastReadPage || 1}`;
+          const progressLabel = isEpub ? `Kapitel ${doc.lastReadPage || 1} von ${doc.pageCount}` : `Seite ${doc.lastReadPage || 1} von ${doc.pageCount}`;
           const pct = Math.min(
             100,
             Math.max(
@@ -38,12 +41,21 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.m
             >
               <div className="flex items-start justify-between gap-2.5">
                 <div className="min-w-0 flex-1">
-                  <h3
-                    className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate"
-                    title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
-                  >
-                    {formatDocTitle(doc)}
-                  </h3>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 ${
+                      isEpub
+                        ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30'
+                        : 'bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20'
+                    }`}>
+                      {isEpub ? 'EPUB' : 'PDF'}
+                    </span>
+                    <h3
+                      className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition truncate"
+                      title={doc.metaTitle ? `${doc.metaTitle} (${doc.fileName})` : doc.fileName}
+                    >
+                      {formatDocTitle(doc)}
+                    </h3>
+                  </div>
                   {(doc.authors || doc.publicationYear) && (
                     <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
                       {doc.authors}
@@ -57,14 +69,14 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.m
                 </div>
                 <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-slate-950 font-semibold text-[11px] shadow-xs group-hover:scale-105 transition">
                   <Play className="w-3 h-3 fill-current" />
-                  S. {doc.lastReadPage || 1}
+                  {pageOrChapter}
                 </span>
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                   <span>
-                    Seite {doc.lastReadPage || 1} von {doc.pageCount}
+                    {progressLabel}
                   </span>
                   <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
                     {pct}%

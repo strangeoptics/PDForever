@@ -38,6 +38,32 @@ public final class DocumentSpecifications {
                 predicates.add(cb.equal(cb.upper(statusExpr), normStatus));
             }
 
+            // 3b. format (PDF, EPUB, EBOOK)
+            if (c.format() != null && !c.format().isBlank()) {
+                String reqFormat = c.format().strip().toUpperCase(Locale.ROOT);
+                if ("EPUB".equals(reqFormat)) {
+                    Predicate formatIsEpub = cb.equal(cb.upper(root.get("format")), "EPUB");
+                    Predicate pathIsEpub = cb.like(cb.lower(root.get("relativePath")), "%.epub");
+                    predicates.add(cb.or(formatIsEpub, pathIsEpub));
+                } else if ("PDF".equals(reqFormat)) {
+                    Predicate formatIsPdf = cb.equal(cb.upper(root.get("format")), "PDF");
+                    Predicate formatNull = cb.isNull(root.get("format"));
+                    Predicate notEpub = cb.notLike(cb.lower(root.get("relativePath")), "%.epub");
+                    predicates.add(cb.and(cb.or(formatIsPdf, formatNull), notEpub));
+                } else if ("EBOOK".equals(reqFormat) || "EBOOKS".equals(reqFormat)) {
+                    Predicate formatEbook = cb.upper(root.get("format")).in("EPUB", "MOBI", "AZW", "AZW3");
+                    Predicate pathEbook = cb.or(
+                            cb.like(cb.lower(root.get("relativePath")), "%.epub"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.mobi"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw"),
+                            cb.like(cb.lower(root.get("relativePath")), "%.azw3")
+                    );
+                    predicates.add(cb.or(formatEbook, pathEbook));
+                } else {
+                    predicates.add(cb.equal(cb.upper(root.get("format")), reqFormat));
+                }
+            }
+
             // 4. minPages / maxPages
             if (c.minPages() != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("pageCount"), c.minPages()));

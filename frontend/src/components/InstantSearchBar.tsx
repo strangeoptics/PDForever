@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Sparkles, SlidersHorizontal, FileText } from 'lucide-react';
+import { Search, X, Sparkles, SlidersHorizontal, FileText, BookOpen } from 'lucide-react';
 import { api } from '../api';
 import { DocumentFilterParams, SearchResultGroup } from '../types';
 
@@ -129,40 +129,50 @@ export const InstantSearchBar: React.FC<InstantSearchBarProps> = React.memo(({
               No fulltext matches found for "{searchQuery}".
             </div>
           ) : (
-            searchResults.map((group) => (
-              <div key={group.docId} className="p-3.5 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => handleSelectResult(group.docId, group.matches[0]?.pageNumber || 1)}
-                    className="font-semibold text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 text-left"
-                  >
-                    <FileText className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{group.title}</span>
-                  </button>
-                  <span className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
-                    {group.relPath}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5 pl-5">
-                  {group.matches.map((m) => (
+            searchResults.map((group) => {
+              const isEpub = group.format === 'EPUB' || group.relPath.toLowerCase().endsWith('.epub');
+              return (
+                <div key={group.docId} className="p-3.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
                     <button
-                      key={`${group.docId}-p${m.pageNumber}`}
-                      onClick={() => handleSelectResult(group.docId, m.pageNumber)}
-                      className="w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition flex items-start gap-2.5 group"
+                      onClick={() => handleSelectResult(group.docId, group.matches[0]?.pageNumber || 1)}
+                      className="font-semibold text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 text-left min-w-0"
                     >
-                      <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[11px] font-medium">
-                        p. {m.pageNumber}
+                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase shrink-0 ${
+                        isEpub
+                          ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30'
+                          : 'bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20'
+                      }`}>
+                        {isEpub ? <BookOpen className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
+                        {isEpub ? 'EPUB' : 'PDF'}
                       </span>
-                      <p
-                        className="search-snippet text-xs text-slate-700 dark:text-slate-300 line-clamp-2 leading-relaxed"
-                        dangerouslySetInnerHTML={{ __html: m.snippetHtml }}
-                      />
+                      <span className="truncate">{group.title}</span>
                     </button>
-                  ))}
+                    <span className="text-[11px] font-mono text-slate-400 truncate max-w-xs shrink-0">
+                      {group.relPath}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 pl-5">
+                    {group.matches.map((m) => (
+                      <button
+                        key={`${group.docId}-p${m.pageNumber}`}
+                        onClick={() => handleSelectResult(group.docId, m.pageNumber)}
+                        className="w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition flex items-start gap-2.5 group"
+                      >
+                        <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[11px] font-medium">
+                          {isEpub ? `Kap. ${m.pageNumber}` : `p. ${m.pageNumber}`}
+                        </span>
+                        <p
+                          className="search-snippet text-xs text-slate-700 dark:text-slate-300 line-clamp-2 leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: m.snippetHtml }}
+                        />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}

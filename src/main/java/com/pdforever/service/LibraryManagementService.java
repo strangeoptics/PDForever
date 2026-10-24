@@ -133,7 +133,7 @@ public class LibraryManagementService {
     public DocumentFacetsDto getDocumentFacets(String path) {
         String normPath = DocumentSpecifications.normalizePathPrefix(path);
         List<Object[]> aggRows = documentRepository.computeDocumentAggregateFacets(normPath);
-        Object[] agg = (aggRows != null && !aggRows.isEmpty()) ? aggRows.get(0) : new Object[12];
+        Object[] agg = (aggRows != null && !aggRows.isEmpty()) ? aggRows.get(0) : new Object[14];
 
         int totalDocs = toInt(agg[0]);
         int unreadCount = toInt(agg[1]);
@@ -147,6 +147,8 @@ public class LibraryManagementService {
         int maxPageCount = toInt(agg[9]);
         Integer minPubYear = toNullableInt(agg[10]);
         Integer maxPubYear = toNullableInt(agg[11]);
+        int pdfCount = toInt(agg[12]);
+        int epubCount = toInt(agg[13]);
 
         List<Object[]> noteRows = noteRepository.computeNoteFacetCounts(normPath);
         Object[] noteAgg = (noteRows != null && !noteRows.isEmpty()) ? noteRows.get(0) : new Object[2];
@@ -186,6 +188,8 @@ public class LibraryManagementService {
                 maxPageCount,
                 minPubYear,
                 maxPubYear,
+                pdfCount,
+                epubCount,
                 tagFacets
         );
     }

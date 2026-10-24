@@ -119,6 +119,8 @@ export const App: React.FC = () => {
     setSelectedTagName,
     selectedStatusFilter,
     setSelectedStatusFilter,
+    selectedFormatFilter,
+    setSelectedFormatFilter,
     facetsPanelOpen,
     setFacetsPanelOpen,
     minPagesFilter,
@@ -149,7 +151,7 @@ export const App: React.FC = () => {
     activeFacetCount,
     resetAllFilters,
     handleToggleTagFacet,
-  } = useDocumentFilters({ folder: initialUrlState.folder, tag: initialUrlState.tag, status: initialUrlState.status });
+  } = useDocumentFilters({ folder: initialUrlState.folder, tag: initialUrlState.tag, status: initialUrlState.status, format: initialUrlState.format });
   const [facets, setFacets] = useState<DocumentFacets | null>(null);
 
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
@@ -397,6 +399,7 @@ export const App: React.FC = () => {
       if (parsed.folder !== null) setSelectedFolderPath(parsed.folder);
       if (parsed.tag !== null) setSelectedTagName(parsed.tag);
       if (parsed.status !== null) setSelectedStatusFilter(parsed.status);
+      if (parsed.format !== null) setSelectedFormatFilter(parsed.format);
       if (parsed.tab) setSidebarTab(parsed.tab);
     },
     [
@@ -406,6 +409,7 @@ export const App: React.FC = () => {
       setSelectedFolderPath,
       setSelectedTagName,
       setSelectedStatusFilter,
+      setSelectedFormatFilter,
     ]
   );
 
@@ -420,6 +424,7 @@ export const App: React.FC = () => {
       folder: selectedFolderPath,
       tag: selectedTagName,
       status: selectedStatusFilter,
+      format: selectedFormatFilter,
       tab: sidebarTab,
       noteId: targetJump?.noteId || null,
     });
@@ -431,6 +436,7 @@ export const App: React.FC = () => {
     selectedFolderPath,
     selectedTagName,
     selectedStatusFilter,
+    selectedFormatFilter,
     sidebarTab,
     targetJump?.noteId,
     syncUrl,
@@ -829,6 +835,8 @@ export const App: React.FC = () => {
                   activeFacetCount={activeFacetCount}
                   selectedStatusFilter={selectedStatusFilter}
                   setSelectedStatusFilter={setSelectedStatusFilter}
+                  selectedFormatFilter={selectedFormatFilter}
+                  setSelectedFormatFilter={setSelectedFormatFilter}
                   sortBy={sortBy}
                   sortDir={sortDir}
                   setSortBy={setSortBy}
@@ -866,7 +874,7 @@ export const App: React.FC = () => {
                 <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-800 p-12 text-center space-y-3">
                   <FileText className="w-10 h-10 text-slate-400 mx-auto stroke-1" />
                   <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    No PDF documents found in this view
+                    No documents found in this view
                   </div>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
                     Drop PDF files into the <code className="font-mono">/storage</code> directory. WatchService will automatically debounce and index them in place.

@@ -8,6 +8,7 @@ import {
   FileText,
   Calendar,
   Tag as TagIcon,
+  BookOpen,
 } from 'lucide-react';
 import { DocumentFacets } from '../types';
 
@@ -16,6 +17,8 @@ export interface FacetedFilterBarProps {
   activeFacetCount: number;
   selectedStatusFilter: string;
   setSelectedStatusFilter: (val: string) => void;
+  selectedFormatFilter: string;
+  setSelectedFormatFilter: (val: string) => void;
   sortBy: string;
   sortDir: 'asc' | 'desc';
   setSortBy: (val: string) => void;
@@ -53,6 +56,8 @@ export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = React.memo(({
   activeFacetCount,
   selectedStatusFilter,
   setSelectedStatusFilter,
+  selectedFormatFilter,
+  setSelectedFormatFilter,
   sortBy,
   sortDir,
   setSortBy,
@@ -87,31 +92,65 @@ export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = React.memo(({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Reading Status Filter Pills with Facet Counts */}
-        <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-          {(
-            [
-              { value: '', label: 'Alle', count: facets?.totalDocuments },
-              { value: 'READING', label: 'Am Lesen', count: facets?.readingCount },
-              { value: 'UNREAD', label: 'Ungelesen', count: facets?.unreadCount },
-              { value: 'COMPLETED', label: 'Gelesen', count: facets?.completedCount },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setSelectedStatusFilter(tab.value)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
-                selectedStatusFilter === tab.value
-                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              <span>{tab.label}</span>
-              {tab.count !== undefined && (
-                <span className="text-[10px] font-mono opacity-70">({tab.count})</span>
-              )}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Format Filter Pills (Alle / PDF / EPUB) */}
+          <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            {(
+              [
+                { value: '', label: 'Alle Formate', count: facets?.totalDocuments, icon: null },
+                { value: 'PDF', label: 'PDF', count: facets?.pdfCount, icon: FileText, color: 'text-red-500' },
+                { value: 'EPUB', label: 'EPUB', count: facets?.epubCount, icon: BookOpen, color: 'text-purple-500' },
+              ] as const
+            ).map((tab) => {
+              const Icon = tab.icon;
+              const isSelected = selectedFormatFilter === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setSelectedFormatFilter(tab.value)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {Icon && <Icon className={`w-3 h-3 ${isSelected ? 'text-purple-600 dark:text-purple-400' : tab.color}`} />}
+                  <span>{tab.label}</span>
+                  {tab.count !== undefined && (
+                    <span className="text-[10px] font-mono opacity-70">({tab.count})</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Reading Status Filter Pills with Facet Counts */}
+          <div className="inline-flex rounded-xl p-1 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            {(
+              [
+                { value: '', label: 'Alle Status', count: facets?.totalDocuments },
+                { value: 'READING', label: 'Am Lesen', count: facets?.readingCount },
+                { value: 'UNREAD', label: 'Ungelesen', count: facets?.unreadCount },
+                { value: 'COMPLETED', label: 'Gelesen', count: facets?.completedCount },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setSelectedStatusFilter(tab.value)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
+                  selectedStatusFilter === tab.value
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span className="text-[10px] font-mono opacity-70">({tab.count})</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -312,8 +351,43 @@ export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = React.memo(({
       {/* Expanded Faceted Filter Drawer */}
       {facetsPanelOpen && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {/* Facet Column 1: Lesezettel & Themen-Filter */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            {/* Facet Column 1: Dateiformat */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-purple-500" />
+                  Dateiformat
+                </span>
+              </label>
+              <div className="grid grid-cols-3 gap-1">
+                {(
+                  [
+                    { val: '', label: 'Alle', count: facets?.totalDocuments },
+                    { val: 'PDF', label: 'PDF', count: facets?.pdfCount },
+                    { val: 'EPUB', label: 'EPUB', count: facets?.epubCount },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.val}
+                    type="button"
+                    onClick={() => setSelectedFormatFilter(opt.val)}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition flex flex-col items-center justify-center ${
+                      selectedFormatFilter === opt.val
+                        ? 'border-purple-500 bg-purple-500/15 text-purple-700 dark:text-purple-300'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {opt.count !== undefined && (
+                      <span className="text-[10px] font-mono opacity-70">({opt.count})</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Facet Column 2: Lesezettel & Themen-Filter */}
             <div className="space-y-2">
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <BookMarked className="w-3.5 h-3.5 text-amber-500" />

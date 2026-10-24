@@ -5,12 +5,14 @@ export interface InitialFilterValues {
   folder?: string | null;
   tag?: string | null;
   status?: string | null;
+  format?: string | null;
 }
 
 export function useDocumentFilters(initialValues?: InitialFilterValues) {
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>(initialValues?.folder || '');
   const [selectedTagName, setSelectedTagName] = useState<string>(initialValues?.tag || '');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>(initialValues?.status || '');
+  const [selectedFormatFilter, setSelectedFormatFilter] = useState<string>(initialValues?.format || '');
   const [facetsPanelOpen, setFacetsPanelOpen] = useState<boolean>(false);
   const [minPagesFilter, setMinPagesFilter] = useState<string>('');
   const [maxPagesFilter, setMaxPagesFilter] = useState<string>('');
@@ -53,6 +55,7 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
       path: selectedFolderPath || undefined,
       tag: selectedTagName || undefined,
       status: selectedStatusFilter || undefined,
+      format: selectedFormatFilter || undefined,
       minPages: minP != null && !Number.isNaN(minP) ? minP : null,
       maxPages: maxP != null && !Number.isNaN(maxP) ? maxP : null,
       hasNotes: hasNotesFilter,
@@ -71,6 +74,7 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
     selectedFolderPath,
     selectedTagName,
     selectedStatusFilter,
+    selectedFormatFilter,
     minPagesFilter,
     maxPagesFilter,
     hasNotesFilter,
@@ -90,6 +94,7 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
     if (selectedFolderPath) count++;
     if (selectedTagName) count += selectedTagName.split(',').filter(Boolean).length;
     if (selectedStatusFilter) count++;
+    if (selectedFormatFilter) count++;
     if (minPagesFilter.trim() || maxPagesFilter.trim()) count++;
     if (hasNotesFilter !== null) count++;
     if (noteTopicFilter.trim()) count++;
@@ -101,6 +106,7 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
     selectedFolderPath,
     selectedTagName,
     selectedStatusFilter,
+    selectedFormatFilter,
     minPagesFilter,
     maxPagesFilter,
     hasNotesFilter,
@@ -115,6 +121,7 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
     setSelectedFolderPath('');
     setSelectedTagName('');
     setSelectedStatusFilter('');
+    setSelectedFormatFilter('');
     setMinPagesFilter('');
     setMaxPagesFilter('');
     setHasNotesFilter(null);
@@ -150,6 +157,8 @@ export function useDocumentFilters(initialValues?: InitialFilterValues) {
     setSelectedTagName,
     selectedStatusFilter,
     setSelectedStatusFilter,
+    selectedFormatFilter,
+    setSelectedFormatFilter,
     facetsPanelOpen,
     setFacetsPanelOpen,
     minPagesFilter,

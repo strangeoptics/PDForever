@@ -123,7 +123,8 @@ public class SearchService {
                         List<PageMatchDto> sortedMatches = acc.matches.stream()
                                 .sorted(Comparator.comparingInt(PageMatchDto::pageNumber))
                                 .toList();
-                        return new SearchResultGroupDto(acc.docId, acc.title, acc.relPath, sortedMatches);
+                        String docFormat = (acc.relPath != null && acc.relPath.toLowerCase(Locale.ROOT).endsWith(".epub")) ? "EPUB" : "PDF";
+                        return new SearchResultGroupDto(acc.docId, acc.title, acc.relPath, sortedMatches, docFormat);
                     })
                     .toList();
 

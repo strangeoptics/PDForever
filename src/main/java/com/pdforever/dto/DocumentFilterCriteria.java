@@ -16,11 +16,31 @@ public record DocumentFilterCriteria(
         Integer yearTo,
         Boolean hasMetadata,
         String sortBy,
-        String sortDir
+        String sortDir,
+        String format
 ) {
+    public DocumentFilterCriteria(
+            String path,
+            String tag,
+            String status,
+            Integer minPages,
+            Integer maxPages,
+            Boolean hasNotes,
+            String noteQuery,
+            Instant modifiedAfter,
+            Instant modifiedBefore,
+            Integer yearFrom,
+            Integer yearTo,
+            Boolean hasMetadata,
+            String sortBy,
+            String sortDir
+    ) {
+        this(path, tag, status, minPages, maxPages, hasNotes, noteQuery, modifiedAfter, modifiedBefore, yearFrom, yearTo, hasMetadata, sortBy, sortDir, null);
+    }
+
     public static DocumentFilterCriteria empty() {
         return new DocumentFilterCriteria(
-                null, null, null, null, null, null, null, null, null, null, null, null, "fileName", "asc"
+                null, null, null, null, null, null, null, null, null, null, null, null, "fileName", "asc", null
         );
     }
 
@@ -28,6 +48,7 @@ public record DocumentFilterCriteria(
         return (path != null && !path.isBlank())
                 || (tag != null && !tag.isBlank())
                 || (status != null && !status.isBlank())
+                || (format != null && !format.isBlank())
                 || minPages != null
                 || maxPages != null
                 || hasNotes != null

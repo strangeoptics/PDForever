@@ -64,6 +64,7 @@ public class DocumentController {
             @RequestParam(required = false) String path,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String format,
             @RequestParam(required = false) Integer minPages,
             @RequestParam(required = false) Integer maxPages,
             @RequestParam(required = false) Boolean hasNotes,
@@ -92,7 +93,8 @@ public class DocumentController {
                 yearTo,
                 hasMetadata,
                 sortBy,
-                sortDir
+                sortDir,
+                format
         );
         return libraryService.getDocuments(criteria, page, size);
     }
