@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,6 +16,23 @@ public interface ReadingNoteRepository extends JpaRepository<ReadingNote, UUID> 
     List<ReadingNote> findAllByDocumentIdOrderByPageNumberAscCreatedAtAsc(UUID documentId);
 
     int countByDocumentId(UUID documentId);
+
+    @Query("""
+            SELECT n.document.id, COUNT(n.id)
+            FROM ReadingNote n
+            WHERE n.document.id IN :docIds
+            GROUP BY n.document.id
+            """)
+    List<Object[]> countNotesByDocumentIds(@Param("docIds") Collection<UUID> docIds);
+
+    @Query("""
+            SELECT COUNT(DISTINCT n.document.id), COUNT(n.id)
+            FROM ReadingNote n
+            JOIN n.document d
+            WHERE d.isDeleted = false
+              AND (:pathPrefix IS NULL OR :pathPrefix = '' OR d.relativePath = :pathPrefix OR d.relativePath LIKE CONCAT(:pathPrefix, '/%'))
+            """)
+    List<Object[]> computeNoteFacetCounts(@Param("pathPrefix") String pathPrefix);
 
     @Query("""
             SELECT n FROM ReadingNote n
@@ -38,4 +56,3 @@ public interface ReadingNoteRepository extends JpaRepository<ReadingNote, UUID> 
             """)
     List<ReadingNote> searchNotes(@Param("query") String query);
 }
-
