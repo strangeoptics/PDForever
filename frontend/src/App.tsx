@@ -31,6 +31,7 @@ import {
 import { LeftSidebar } from './components/LeftSidebar';
 import { useSidebarResize } from './hooks/useSidebarResize';
 import { useDocumentFilters } from './hooks/useDocumentFilters';
+import { useUrlState, parseUrlState, ParsedUrlState } from './hooks/useUrlState';
 import { useFullscreen } from './hooks/useFullscreen';
 import { VirtualizedDocumentGrid } from './components/VirtualizedDocumentGrid';
 import { FacetedFilterBar } from './components/FacetedFilterBar';
@@ -77,12 +78,13 @@ function loadInitialDarkMode(): boolean {
 }
 
 export const App: React.FC = () => {
+  const initialUrlState = useRef(parseUrlState()).current;
   const { isFullscreen, toggleFullscreen } = useFullscreen();
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialDarkMode);
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [coverCacheVersion, setCoverCacheVersion] = useState<number>(0);
-  const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes' | 'rag'>('folders');
+  const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes' | 'rag'>(initialUrlState.tab || 'folders');
   const {
     sidebarWidth,
     sidebarCollapsed,
@@ -107,7 +109,7 @@ export const App: React.FC = () => {
   const [docOutline, setDocOutline] = useState<TocItem[]>([]);
   const [outlineLoading, setOutlineLoading] = useState<boolean>(false);
   const [tocFilter, setTocFilter] = useState<string>('');
-  const [activeViewerPage, setActiveViewerPage] = useState<number>(1);
+  const [activeViewerPage, setActiveViewerPage] = useState<number>(initialUrlState.page || 1);
 
   // Document Filters & Facets Hook
   const {
@@ -147,7 +149,7 @@ export const App: React.FC = () => {
     activeFacetCount,
     resetAllFilters,
     handleToggleTagFacet,
-  } = useDocumentFilters();
+  } = useDocumentFilters({ folder: initialUrlState.folder, tag: initialUrlState.tag, status: initialUrlState.status });
   const [facets, setFacets] = useState<DocumentFacets | null>(null);
 
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
@@ -354,6 +356,85 @@ export const App: React.FC = () => {
       return next;
     });
   }, [activeDoc, secondaryDoc]);
+
+  // Open initial document if URL contains ?doc=...
+  const initialOpenedRef = useRef(false);
+  useEffect(() => {
+    if (initialOpenedRef.current) return;
+    initialOpenedRef.current = true;
+
+    if (initialUrlState.docId) {
+      handleOpenDocument(
+        initialUrlState.docId,
+        initialUrlState.page || undefined,
+        initialUrlState.noteId || undefined
+      );
+      if (initialUrlState.splitDocId) {
+        handleOpenInSplitView(initialUrlState.splitDocId);
+      }
+    }
+  }, [initialUrlState, handleOpenDocument, handleOpenInSplitView]);
+
+  const onPopStateNavigation = useCallback(
+    (parsed: ParsedUrlState) => {
+      if (parsed.docId) {
+        if (!activeDoc || activeDoc.id !== parsed.docId) {
+          handleOpenDocument(parsed.docId, parsed.page || undefined, parsed.noteId || undefined);
+        } else if (parsed.page && parsed.page !== activeViewerPage) {
+          setTargetJump({
+            page: parsed.page,
+            noteId: parsed.noteId || undefined,
+            timestamp: Date.now(),
+          });
+        }
+      } else {
+        if (activeDoc) {
+          setActiveDoc(null);
+          setSplitViewOpen(false);
+        }
+      }
+
+      if (parsed.folder !== null) setSelectedFolderPath(parsed.folder);
+      if (parsed.tag !== null) setSelectedTagName(parsed.tag);
+      if (parsed.status !== null) setSelectedStatusFilter(parsed.status);
+      if (parsed.tab) setSidebarTab(parsed.tab);
+    },
+    [
+      activeDoc,
+      activeViewerPage,
+      handleOpenDocument,
+      setSelectedFolderPath,
+      setSelectedTagName,
+      setSelectedStatusFilter,
+    ]
+  );
+
+  const { syncUrl } = useUrlState({ onPopStateNavigation });
+
+  // Sync active reading state / filters with URL
+  useEffect(() => {
+    syncUrl({
+      docId: activeDoc?.id || null,
+      page: activeViewerPage,
+      splitDocId: splitViewOpen && secondaryDoc ? secondaryDoc.id : null,
+      folder: selectedFolderPath,
+      tag: selectedTagName,
+      status: selectedStatusFilter,
+      tab: sidebarTab,
+      noteId: targetJump?.noteId || null,
+    });
+  }, [
+    activeDoc?.id,
+    activeViewerPage,
+    splitViewOpen,
+    secondaryDoc?.id,
+    selectedFolderPath,
+    selectedTagName,
+    selectedStatusFilter,
+    sidebarTab,
+    targetJump?.noteId,
+    syncUrl,
+  ]);
 
   const handleUpdateReadingProgress = useCallback(
     async (docId: string, payload: UpdateReadingProgressPayload) => {

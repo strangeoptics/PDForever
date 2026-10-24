@@ -1,10 +1,16 @@
 import { useState, useMemo, useCallback } from 'react';
 import { DocumentFilterParams } from '../types';
 
-export function useDocumentFilters() {
-  const [selectedFolderPath, setSelectedFolderPath] = useState<string>('');
-  const [selectedTagName, setSelectedTagName] = useState<string>('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('');
+export interface InitialFilterValues {
+  folder?: string | null;
+  tag?: string | null;
+  status?: string | null;
+}
+
+export function useDocumentFilters(initialValues?: InitialFilterValues) {
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string>(initialValues?.folder || '');
+  const [selectedTagName, setSelectedTagName] = useState<string>(initialValues?.tag || '');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>(initialValues?.status || '');
   const [facetsPanelOpen, setFacetsPanelOpen] = useState<boolean>(false);
   const [minPagesFilter, setMinPagesFilter] = useState<string>('');
   const [maxPagesFilter, setMaxPagesFilter] = useState<string>('');
