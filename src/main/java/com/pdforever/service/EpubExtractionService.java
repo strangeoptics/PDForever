@@ -658,14 +658,16 @@ public class EpubExtractionService {
                 }
 
                 Integer pageNumber = null;
+                String anchor = null;
                 NodeList contentNodes = elem.getElementsByTagName("content");
                 if (contentNodes.getLength() > 0) {
                     String src = ((Element) contentNodes.item(0)).getAttribute("src");
                     pageNumber = resolveSpineIndex(src, hrefToSpineIndex);
+                    anchor = extractAnchor(src);
                 }
 
                 List<TocItemDto> subItems = parseNavPoints(elem, hrefToSpineIndex);
-                items.add(new TocItemDto(title, pageNumber, subItems));
+                items.add(new TocItemDto(title, pageNumber, anchor, subItems));
             }
         }
         return items;
@@ -701,13 +703,16 @@ public class EpubExtractionService {
             if (children.item(i) instanceof Element li && "li".equals(li.getTagName())) {
                 String title = "";
                 Integer pageNumber = null;
+                String anchor = null;
                 List<TocItemDto> subChildren = Collections.emptyList();
 
                 NodeList aNodes = li.getElementsByTagName("a");
                 if (aNodes.getLength() > 0) {
                     Element a = (Element) aNodes.item(0);
                     title = a.getTextContent().trim();
-                    pageNumber = resolveSpineIndex(a.getAttribute("href"), hrefToSpineIndex);
+                    String href = a.getAttribute("href");
+                    pageNumber = resolveSpineIndex(href, hrefToSpineIndex);
+                    anchor = extractAnchor(href);
                 }
 
                 NodeList subOls = li.getElementsByTagName("ol");
@@ -716,11 +721,20 @@ public class EpubExtractionService {
                 }
 
                 if (!title.isBlank()) {
-                    items.add(new TocItemDto(title, pageNumber, subChildren));
+                    items.add(new TocItemDto(title, pageNumber, anchor, subChildren));
                 }
             }
         }
         return items;
+    }
+
+    private String extractAnchor(String href) {
+        if (href == null) return null;
+        int hashIdx = href.indexOf('#');
+        if (hashIdx >= 0 && hashIdx + 1 < href.length()) {
+            return href.substring(hashIdx + 1).trim();
+        }
+        return null;
     }
 
     private Integer resolveSpineIndex(String href, Map<String, Integer> hrefToSpineIndex) {

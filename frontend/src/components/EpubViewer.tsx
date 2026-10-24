@@ -24,7 +24,7 @@ import { api } from '../api';
 interface EpubViewerProps {
   document: DocumentItem;
   notes: ReadingNote[];
-  targetJump: { page: number; noteId?: string; timestamp: number } | null;
+  targetJump: { page: number; anchor?: string | null; noteId?: string; timestamp: number } | null;
   inspectorOpen: boolean;
   isSplitView?: boolean;
   isSecondaryPane?: boolean;
@@ -144,6 +144,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const pendingJumpNoteIdRef = useRef<string | null>(null);
+  const pendingAnchorRef = useRef<string | null>(null);
 
   // Load chapters list on mount or document switch
   useEffect(() => {
@@ -175,8 +176,8 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         if (!active) return;
         setChapterHtml(html);
         setLoading(false);
-        // Scroll to top of reading pane if not jumping to a specific note
-        if (containerRef.current && !pendingJumpNoteIdRef.current) {
+        // Scroll to top of reading pane if not jumping to a specific note or anchor
+        if (containerRef.current && !pendingJumpNoteIdRef.current && !pendingAnchorRef.current) {
           containerRef.current.scrollTop = 0;
         }
       })
@@ -210,15 +211,15 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     return notes.filter((n) => n.pageNumber === currentChapter);
   }, [notes, currentChapter]);
 
-  // Pulse animation helper for a highlighted element
+  // Pulse animation helper for a highlighted element or heading anchor
   const pulseHighlight = useCallback((el: HTMLElement) => {
-    el.classList.remove('epub-highlight-active');
+    el.classList.remove('epub-highlight-active', 'epub-anchor-active');
     // Force DOM reflow to restart animation if already active
     void el.offsetWidth;
-    el.classList.add('epub-highlight-active');
+    el.classList.add(el.tagName.toLowerCase() === 'mark' ? 'epub-highlight-active' : 'epub-anchor-active');
     setTimeout(() => {
-      el.classList.remove('epub-highlight-active');
-    }, 2200);
+      el.classList.remove('epub-highlight-active', 'epub-anchor-active');
+    }, 2400);
   }, []);
 
   // Scroll to a specific note's highlighted quote
@@ -227,9 +228,71 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     if (!root) return;
     const mark = root.querySelector(`mark.epub-note-highlight[data-note-id="${noteId}"]`) as HTMLElement | null;
     if (mark) {
-      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const container = containerRef.current;
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const markRect = mark.getBoundingClientRect();
+        const scrollOffset = markRect.top - containerRect.top + container.scrollTop;
+        container.scrollTo({
+          top: Math.max(0, scrollOffset - container.clientHeight / 2 + markRect.height / 2),
+          behavior: 'smooth',
+        });
+      } else {
+        mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       pulseHighlight(mark);
       pendingJumpNoteIdRef.current = null;
+    }
+  }, [pulseHighlight]);
+
+  // Scroll to a specific HTML anchor (#id or name) within the current chapter
+  const scrollToAnchor = useCallback((anchor: string) => {
+    const root = contentRef.current;
+    if (!root) return;
+    const cleanAnchor = anchor.startsWith('#') ? anchor.slice(1) : anchor;
+    if (!cleanAnchor) return;
+
+    let target: HTMLElement | null = null;
+    try {
+      target = root.querySelector(`[id="${CSS.escape(cleanAnchor)}"], [name="${CSS.escape(cleanAnchor)}"]`) as HTMLElement | null;
+    } catch {
+      // Ignore CSS selector escape error
+    }
+
+    if (!target) {
+      const lower = cleanAnchor.toLowerCase();
+      const allWithIdOrName = root.querySelectorAll('[id], [name]');
+      for (let i = 0; i < allWithIdOrName.length; i++) {
+        const el = allWithIdOrName[i];
+        if (el.id?.toLowerCase() === lower || el.getAttribute('name')?.toLowerCase() === lower) {
+          target = el as HTMLElement;
+          break;
+        }
+      }
+    }
+
+    if (target) {
+      // If target is an empty inline anchor inside a heading or block, target the heading instead
+      const targetBlock: HTMLElement =
+        (target.tagName.toLowerCase() === 'a' && !target.textContent?.trim() && target.parentElement)
+          ? target.parentElement
+          : target;
+
+      const container = containerRef.current;
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const targetRect = targetBlock.getBoundingClientRect();
+        const scrollOffset = targetRect.top - containerRect.top + container.scrollTop;
+        container.scrollTo({
+          top: Math.max(0, scrollOffset - 24),
+          behavior: 'smooth',
+        });
+      } else {
+        targetBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      pulseHighlight(targetBlock);
+      pendingAnchorRef.current = null;
     }
   }, [pulseHighlight]);
 
@@ -357,8 +420,23 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
   useEffect(() => {
     if (!loading && chapterHtml) {
       applyHighlights();
+      if (pendingAnchorRef.current) {
+        const anchor = pendingAnchorRef.current;
+        const t1 = setTimeout(() => {
+          scrollToAnchor(anchor);
+        }, 80);
+        const t2 = setTimeout(() => {
+          if (pendingAnchorRef.current === anchor) {
+            scrollToAnchor(anchor);
+          }
+        }, 300);
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+        };
+      }
     }
-  }, [loading, chapterHtml, applyHighlights]);
+  }, [loading, chapterHtml, applyHighlights, scrollToAnchor]);
 
   // React to targetJump (TOC, Notes, Search Results)
   useEffect(() => {
@@ -368,15 +446,25 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
     if (targetJump.noteId) {
       pendingJumpNoteIdRef.current = targetJump.noteId;
     }
+    if (targetJump.anchor) {
+      pendingAnchorRef.current = targetJump.anchor;
+    }
 
     if (targetPage !== currentChapter) {
       changeChapter(targetPage);
-    } else if (targetJump.noteId) {
-      setTimeout(() => {
-        scrollToNote(targetJump.noteId!);
-      }, 100);
+    } else {
+      if (targetJump.anchor) {
+        setTimeout(() => {
+          scrollToAnchor(targetJump.anchor!);
+        }, 80);
+      }
+      if (targetJump.noteId) {
+        setTimeout(() => {
+          scrollToNote(targetJump.noteId!);
+        }, 100);
+      }
     }
-  }, [targetJump, currentChapter, changeChapter, scrollToNote]);
+  }, [targetJump, currentChapter, changeChapter, scrollToNote, scrollToAnchor]);
 
   // Keyboard navigation (ArrowLeft / ArrowRight)
   useEffect(() => {
@@ -520,6 +608,69 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
           background-color: ${themeStyle.highlightActiveBg} !important;
           box-shadow: 0 0 0 4px ${themeStyle.highlightRing} !important;
           animation: epub-pulse-glow 2s ease-in-out;
+        }
+        .epub-anchor-active {
+          background-color: ${themeStyle.highlightActiveBg} !important;
+          box-shadow: 0 0 0 6px ${themeStyle.highlightRing} !important;
+          border-radius: 4px;
+          animation: epub-pulse-glow 2s ease-in-out;
+          transition: background-color 0.3s ease;
+        }
+        /* Typography for rendered EPUB / eBook content (counteracting Tailwind preflight resets) */
+        .epub-reader-content h1 {
+          display: block;
+          font-size: 1.75em;
+          font-weight: 700;
+          line-height: 1.25;
+          margin-top: 2em;
+          margin-bottom: 0.75em;
+          letter-spacing: -0.015em;
+        }
+        .epub-reader-content h2 {
+          display: block;
+          font-size: 1.4em;
+          font-weight: 700;
+          line-height: 1.3;
+          margin-top: 1.8em;
+          margin-bottom: 0.6em;
+          letter-spacing: -0.01em;
+        }
+        .epub-reader-content h3 {
+          display: block;
+          font-size: 1.22em;
+          font-weight: 600;
+          line-height: 1.35;
+          margin-top: 1.6em;
+          margin-bottom: 0.5em;
+        }
+        .epub-reader-content h4,
+        .epub-reader-content h5,
+        .epub-reader-content h6 {
+          display: block;
+          font-size: 1.08em;
+          font-weight: 600;
+          line-height: 1.4;
+          margin-top: 1.4em;
+          margin-bottom: 0.4em;
+        }
+        .epub-reader-content p {
+          margin-top: 0.75em;
+          margin-bottom: 0.75em;
+        }
+        .epub-reader-content blockquote {
+          border-left: 3px solid ${themeStyle.highlightBorder};
+          padding-left: 1rem;
+          margin: 1.2em 0;
+          font-style: italic;
+          opacity: 0.9;
+        }
+        .epub-reader-content ul,
+        .epub-reader-content ol {
+          padding-left: 1.5rem;
+          margin: 0.8em 0;
+        }
+        .epub-reader-content li {
+          margin: 0.25em 0;
         }
         @keyframes epub-pulse-glow {
           0% { transform: scale(1); box-shadow: 0 0 0 0 ${themeStyle.highlightRing}; }

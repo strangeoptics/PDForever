@@ -157,6 +157,7 @@ export const App: React.FC = () => {
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
   const [targetJump, setTargetJump] = useState<{
     page: number;
+    anchor?: string | null;
     noteId?: string;
     timestamp: number;
   } | null>(null);
@@ -168,6 +169,7 @@ export const App: React.FC = () => {
   const [secondaryDocNotes, setSecondaryDocNotes] = useState<ReadingNote[]>([]);
   const [secondaryTargetJump, setSecondaryTargetJump] = useState<{
     page: number;
+    anchor?: string | null;
     noteId?: string;
     timestamp: number;
   } | null>(null);
@@ -710,7 +712,7 @@ export const App: React.FC = () => {
           tocFilter={tocFilter}
           setTocFilter={setTocFilter}
           activeViewerPage={activeViewerPage}
-          onJumpToPage={(page) => setTargetJump({ page, timestamp: Date.now() })}
+          onJumpToPage={(page, anchor) => setTargetJump({ page, anchor, timestamp: Date.now() })}
           tags={tags}
           selectedTagName={selectedTagName}
           setSelectedTagName={(name) => {

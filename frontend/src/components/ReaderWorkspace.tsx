@@ -16,13 +16,13 @@ import {
 interface ReaderWorkspaceProps {
   activeDoc: DocumentItem;
   docNotes: ReadingNote[];
-  targetJump: { page: number; noteId?: string; timestamp: number } | null;
+  targetJump: { page: number; anchor?: string | null; noteId?: string; timestamp: number } | null;
   inspectorOpen: boolean;
   settings: AppSettings;
   splitViewOpen: boolean;
   secondaryDoc: DocumentItem | null;
   secondaryDocNotes: ReadingNote[];
-  secondaryTargetJump: { page: number; noteId?: string; timestamp: number } | null;
+  secondaryTargetJump: { page: number; anchor?: string | null; noteId?: string; timestamp: number } | null;
   availableDocuments: DocumentItem[];
   tags: Tag[];
   enrichingDoc: boolean;

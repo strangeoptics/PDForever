@@ -91,6 +91,29 @@ class EpubExtractionServiceTest {
         }
     }
 
+    @Test
+    void testInspectPolitischeTheorieEpub() throws IOException {
+        Path path = Path.of("storage/books/topics/politics/Politische Theorie und Ideengeschichte · Eine Einführung -- Münkler, Herfried; Straßenberger, Grit; Rzepka, Vincent.epub");
+        if (!Files.exists(path)) {
+            return;
+        }
+
+        List<TocItemDto> outline = service.extractOutline(path);
+        assertThat(outline).isNotEmpty();
+
+        // Check chapter 1 subitems
+        TocItemDto chap1 = outline.stream().filter(t -> t.title().contains("KAPITEL 1")).findFirst().orElse(null);
+        assertThat(chap1).isNotNull();
+        assertThat(chap1.pageNumber()).isEqualTo(8);
+        assertThat(chap1.anchor()).isNull(); // Main chapter href has no anchor
+        assertThat(chap1.children()).isNotEmpty();
+
+        TocItemDto sec6 = chap1.children().get(0);
+        assertThat(sec6.title()).contains("Das Denken des Politischen");
+        assertThat(sec6.pageNumber()).isEqualTo(8);
+        assertThat(sec6.anchor()).isEqualTo("sec6"); // Anchor extracted!
+    }
+
     private Path createSampleEpub(Path path) throws IOException {
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(path.toFile()), StandardCharsets.UTF_8)) {
             // mimetype

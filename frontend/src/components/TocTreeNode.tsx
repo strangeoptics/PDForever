@@ -29,7 +29,7 @@ export interface TocTreeNodeProps {
   level: number;
   filterQuery: string;
   activeTocPage: number | null;
-  onSelectPage: (page: number) => void;
+  onSelectPage: (page: number, anchor?: string | null) => void;
 }
 
 export const TocTreeNode: React.FC<TocTreeNodeProps> = ({
@@ -89,16 +89,29 @@ export const TocTreeNode: React.FC<TocTreeNodeProps> = ({
 
           <button
             type="button"
-            onClick={() => item.pageNumber && onSelectPage(item.pageNumber)}
+            onClick={() => item.pageNumber && onSelectPage(item.pageNumber, item.anchor)}
             disabled={!item.pageNumber}
-            className="flex-1 text-left truncate disabled:opacity-60"
+            className={`flex-1 text-left truncate disabled:opacity-60 ${
+              level === 0
+                ? 'font-medium text-slate-800 dark:text-slate-200'
+                : 'text-slate-600 dark:text-slate-400 text-[11.5px]'
+            }`}
             title={item.title}
           >
             {item.title}
           </button>
         </div>
 
-        {item.pageNumber !== null && (
+        {item.anchor ? (
+          <button
+            type="button"
+            onClick={() => item.pageNumber && onSelectPage(item.pageNumber, item.anchor)}
+            title={`Abschnitt #${item.anchor}`}
+            className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-colors"
+          >
+            §
+          </button>
+        ) : item.pageNumber !== null ? (
           <button
             type="button"
             onClick={() => onSelectPage(item.pageNumber!)}
@@ -106,7 +119,7 @@ export const TocTreeNode: React.FC<TocTreeNodeProps> = ({
           >
             {item.pageNumber}
           </button>
-        )}
+        ) : null}
       </div>
 
       {hasChildren && isExpanded && (

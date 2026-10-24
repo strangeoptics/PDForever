@@ -201,7 +201,7 @@ export interface LeftSidebarProps {
   tocFilter: string;
   setTocFilter: (val: string) => void;
   activeViewerPage: number;
-  onJumpToPage: (page: number) => void;
+  onJumpToPage: (page: number, anchor?: string | null) => void;
   tags: Tag[];
   selectedTagName: string;
   setSelectedTagName: (val: string) => void;
@@ -445,7 +445,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
                         level={0}
                         filterQuery={tocFilter}
                         activeTocPage={activeTocPage}
-                        onSelectPage={(page) => onJumpToPage(page)}
+                        onSelectPage={(page, anchor) => onJumpToPage(page, anchor)}
                       />
                     ))
                   )}

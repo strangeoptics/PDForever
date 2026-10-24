@@ -20,6 +20,7 @@ export type ReaderViewMode = 'continuous' | 'single' | 'spread' | 'book';
 export interface TocItem {
   title: string;
   pageNumber: number | null;
+  anchor?: string | null;
   children: TocItem[];
 }
 
