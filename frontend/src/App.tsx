@@ -83,7 +83,7 @@ export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialDarkMode);
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [coverCacheVersion, setCoverCacheVersion] = useState<number>(0);
+  const [coverCacheVersion, setCoverCacheVersion] = useState<number>(() => Date.now());
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes' | 'rag'>(initialUrlState.tab || 'folders');
   const {
     sidebarWidth,

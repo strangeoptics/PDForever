@@ -62,6 +62,22 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!-- ImageIO plugins for PDFBox: JPEG 2000 (JPXDecode) and JBIG2 -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-core</artifactId>
+            <version>1.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>1.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>jbig2-imageio</artifactId>
+            <version>3.0.4</version>
+        </dependency>
 
         <!-- Apache Lucene 9.x -->
         <dependency>

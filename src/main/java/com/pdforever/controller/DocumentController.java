@@ -18,6 +18,7 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -154,9 +155,14 @@ public class DocumentController {
     public ResponseEntity<Resource> getDocumentCover(@PathVariable UUID id) {
         Path coverPath = libraryService.getOrCreateDocumentCover(id);
         Resource resource = new FileSystemResource(coverPath);
+        long lastModified = 0;
+        try {
+            lastModified = Files.getLastModifiedTime(coverPath).toMillis();
+        } catch (IOException ignored) {}
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_JPEG)
-                .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS).cachePublic())
+                .lastModified(lastModified)
+                .cacheControl(CacheControl.noCache().mustRevalidate())
                 .body(resource);
     }
 
