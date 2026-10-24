@@ -39,7 +39,7 @@ interface ChatMessage {
   error?: boolean;
 }
 
-export const RagChatTab: React.FC<RagChatTabProps> = ({
+export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
   activeDoc,
   currentFilterParams,
   customOllamaUrl,
@@ -602,5 +602,5 @@ export const RagChatTab: React.FC<RagChatTabProps> = ({
       </div>
     </div>
   );
-};
+});
 

@@ -57,7 +57,7 @@ interface DirectoryTreeItemProps {
   onOpenInSplitView: (docId: string) => void;
 }
 
-const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
+const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = React.memo(({
   node,
   level,
   selectedFolderPath,
@@ -176,7 +176,7 @@ const DirectoryTreeItem: React.FC<DirectoryTreeItemProps> = ({
       )}
     </div>
   );
-};
+});
 
 export interface LeftSidebarProps {
   sidebarTab: 'folders' | 'outline' | 'tags' | 'notes' | 'rag';
@@ -214,7 +214,7 @@ export interface LeftSidebarProps {
   onOpenSettings: () => void;
 }
 
-export const LeftSidebar: React.FC<LeftSidebarProps> = ({
+export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
   sidebarTab,
   setSidebarTab,
   sidebarWidth,
@@ -673,4 +673,4 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       </div>
     </>
   );
-};
+});

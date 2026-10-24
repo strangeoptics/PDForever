@@ -48,7 +48,7 @@ interface ReaderWorkspaceProps {
   onToggleFullscreen?: () => void;
 }
 
-export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = ({
+export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = React.memo(({
   activeDoc,
   docNotes,
   targetJump,
@@ -145,5 +145,5 @@ export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = ({
       )}
     </>
   );
-};
+});
 

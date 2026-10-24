@@ -7,7 +7,7 @@ interface ContinueReadingShelfProps {
   onOpenDocument: (docId: string, page: number) => void;
 }
 
-export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = ({
+export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = React.memo(({
   recentDocuments,
   onOpenDocument,
 }) => {
@@ -83,5 +83,5 @@ export const ContinueReadingShelf: React.FC<ContinueReadingShelfProps> = ({
       </div>
     </section>
   );
-};
+});
 

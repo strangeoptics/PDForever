@@ -14,7 +14,7 @@ export interface VirtualizedDocumentGridProps {
   onLoadMore?: () => void;
 }
 
-export const VirtualizedDocumentGrid: React.FC<VirtualizedDocumentGridProps> = ({
+export const VirtualizedDocumentGrid: React.FC<VirtualizedDocumentGridProps> = React.memo(({
   documents,
   coverCacheVersion = 0,
   showCovers,
@@ -178,5 +178,5 @@ export const VirtualizedDocumentGrid: React.FC<VirtualizedDocumentGridProps> = (
       )}
     </div>
   );
-};
+});
 

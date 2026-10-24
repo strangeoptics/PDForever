@@ -48,7 +48,7 @@ export interface FacetedFilterBarProps {
   onClearTags: () => void;
 }
 
-export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = ({
+export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = React.memo(({
   facets,
   activeFacetCount,
   selectedStatusFilter,
@@ -550,5 +550,5 @@ export const FacetedFilterBar: React.FC<FacetedFilterBarProps> = ({
       )}
     </div>
   );
-};
+});
 

@@ -9,7 +9,7 @@ export interface InstantSearchBarProps {
   onNavigateToDocument: (documentId: string, pageNumber: number) => void;
 }
 
-export const InstantSearchBar: React.FC<InstantSearchBarProps> = ({
+export const InstantSearchBar: React.FC<InstantSearchBarProps> = React.memo(({
   activeFacetCount,
   currentFilterParams,
   onNavigateToDocument,
@@ -168,5 +168,5 @@ export const InstantSearchBar: React.FC<InstantSearchBarProps> = ({
       )}
     </div>
   );
-};
+});
 
