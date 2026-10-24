@@ -1,7 +1,6 @@
 package com.pdforever.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pdforever.config.LibraryProperties;
 import com.pdforever.domain.Document;
 import com.pdforever.domain.ReadingNote;
 import com.pdforever.domain.Tag;
@@ -22,13 +21,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class LibraryManagementService {
@@ -36,11 +32,14 @@ public class LibraryManagementService {
     private final DocumentRepository documentRepository;
     private final TagRepository tagRepository;
     private final ReadingNoteRepository noteRepository;
-    private final DirectoryScannerService scannerService;
+    private final TagService tagService;
+    private final ReadingNoteService readingNoteService;
+    private final CoverThumbnailService coverThumbnailService;
+    private final DocumentReadingProgressService readingProgressService;
     private final PdfExtractionService pdfExtractionService;
     private final MetadataEnrichmentService metadataEnrichmentService;
-    private final FileNameCleaner fileNameCleaner;
-    private final ObjectMapper objectMapper;
+    private final DocumentDtoMapper mapper;
+    private final LibraryProperties properties;
     @PersistenceContext
     private final EntityManager entityManager;
 
@@ -48,23 +47,31 @@ public class LibraryManagementService {
             DocumentRepository documentRepository,
             TagRepository tagRepository,
             ReadingNoteRepository noteRepository,
-            DirectoryScannerService scannerService,
+            TagService tagService,
+            ReadingNoteService readingNoteService,
+            CoverThumbnailService coverThumbnailService,
+            DocumentReadingProgressService readingProgressService,
             PdfExtractionService pdfExtractionService,
             MetadataEnrichmentService metadataEnrichmentService,
-            FileNameCleaner fileNameCleaner,
-            ObjectMapper objectMapper,
+            DocumentDtoMapper mapper,
+            LibraryProperties properties,
             EntityManager entityManager
     ) {
         this.documentRepository = documentRepository;
         this.tagRepository = tagRepository;
         this.noteRepository = noteRepository;
-        this.scannerService = scannerService;
+        this.tagService = tagService;
+        this.readingNoteService = readingNoteService;
+        this.coverThumbnailService = coverThumbnailService;
+        this.readingProgressService = readingProgressService;
         this.pdfExtractionService = pdfExtractionService;
         this.metadataEnrichmentService = metadataEnrichmentService;
-        this.fileNameCleaner = fileNameCleaner;
-        this.objectMapper = objectMapper;
+        this.mapper = mapper;
+        this.properties = properties;
         this.entityManager = entityManager;
     }
+
+    // --- Document Queries & Facets ---
 
     @Transactional(readOnly = true)
     public Page<DocumentDto> getDocuments(String path, String tag, int page, int size) {
@@ -179,6 +186,10 @@ public class LibraryManagementService {
         );
     }
 
+    public Map<UUID, Integer> loadNoteCountsForDocuments(Collection<UUID> docIds) {
+        return mapper.loadNoteCountsForDocuments(docIds);
+    }
+
     private int toInt(Object o) {
         return o instanceof Number n ? n.intValue() : 0;
     }
@@ -187,76 +198,7 @@ public class LibraryManagementService {
         return o instanceof Number n ? n.intValue() : null;
     }
 
-    public Map<UUID, Integer> loadNoteCountsForDocuments(Collection<UUID> docIds) {
-        if (docIds == null || docIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        List<Object[]> rows = noteRepository.countNotesByDocumentIds(docIds);
-        Map<UUID, Integer> map = new HashMap<>(rows.size());
-        for (Object[] row : rows) {
-            if (row != null && row.length >= 2 && row[0] instanceof UUID docId) {
-                map.put(docId, toInt(row[1]));
-            }
-        }
-        return map;
-    }
-
-    @Transactional(readOnly = true)
-    public List<DocumentDto> getRecentDocuments(int limit) {
-        int clampedLimit = Math.clamp(limit, 1, 24);
-        List<Document> docs = documentRepository.findRecentlyReadDocuments(PageRequest.of(0, clampedLimit));
-        if (docs.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<UUID> docIds = docs.stream().map(Document::getId).toList();
-        Map<UUID, Integer> noteCounts = loadNoteCountsForDocuments(docIds);
-        return docs.stream()
-                .map(d -> toDocumentDto(d, noteCounts.getOrDefault(d.getId(), 0)))
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public List<TocItemDto> getDocumentOutline(UUID id) {
-        Path pdfPath = getDocumentFilePath(id);
-        return pdfExtractionService.extractOutline(pdfPath);
-    }
-
-    private static final Set<String> VALID_READING_STATUSES = Set.of("UNREAD", "READING", "COMPLETED");
-
-    @Transactional
-    public DocumentDto updateReadingProgress(UUID id, UpdateReadingProgressRequest request) {
-        Document doc = findActiveDocumentOrThrow(id);
-        int maxPage = Math.max(1, doc.getPageCount() != null ? doc.getPageCount() : 1);
-
-        if (request.lastReadPage() != null) {
-            int clampedPage = Math.clamp(request.lastReadPage(), 1, maxPage);
-            doc.setLastReadPage(clampedPage);
-            doc.setLastOpenedAt(Instant.now());
-
-            // Auto-transition from UNREAD to READING (or COMPLETED on the last page of multi-page PDFs)
-            if (request.readingStatus() == null || request.readingStatus().isBlank()) {
-                String currentStatus = doc.getReadingStatus();
-                if ("UNREAD".equalsIgnoreCase(currentStatus)) {
-                    doc.setReadingStatus("READING");
-                }
-            }
-        }
-
-        if (request.readingStatus() != null && !request.readingStatus().isBlank()) {
-            String normalizedStatus = request.readingStatus().strip().toUpperCase(Locale.ROOT);
-            if (VALID_READING_STATUSES.contains(normalizedStatus)) {
-                doc.setReadingStatus(normalizedStatus);
-                if ("UNREAD".equals(normalizedStatus) && request.lastReadPage() == null) {
-                    doc.setLastReadPage(1);
-                } else if (doc.getLastOpenedAt() == null) {
-                    doc.setLastOpenedAt(Instant.now());
-                }
-            }
-        }
-
-        Document saved = documentRepository.save(doc);
-        return toDocumentDto(saved);
-    }
+    // --- Document Details & Reading Progress ---
 
     @Transactional(readOnly = true)
     public DocumentDto getDocument(UUID id) {
@@ -267,166 +209,96 @@ public class LibraryManagementService {
     @Transactional(readOnly = true)
     public Path getDocumentFilePath(UUID id) {
         Document doc = findActiveDocumentOrThrow(id);
-        Path fullPath = scannerService.getRootPath().resolve(doc.getRelativePath()).normalize();
-        if (!fullPath.startsWith(scannerService.getRootPath()) || !Files.exists(fullPath)) {
+        Path root = properties.rootDir().toAbsolutePath().normalize();
+        Path fullPath = root.resolve(doc.getRelativePath()).normalize();
+        if (!fullPath.startsWith(root) || !Files.exists(fullPath)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF file not found on disk: " + doc.getRelativePath());
         }
         return fullPath;
     }
 
     @Transactional(readOnly = true)
-    public Path getOrCreateDocumentCover(UUID id) {
-        Path pdfPath = getDocumentFilePath(id);
-        Path coversDir = scannerService.getCoversPath();
-        Path coverPath = coversDir.resolve(id + ".jpg").normalize();
-        if (!coverPath.startsWith(coversDir)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid document id");
-        }
-
-        try {
-            if (Files.exists(coverPath) && Files.size(coverPath) > 0) {
-                long coverMtime = Files.getLastModifiedTime(coverPath).toMillis();
-                long pdfMtime = Files.getLastModifiedTime(pdfPath).toMillis();
-                if (coverMtime >= pdfMtime) {
-                    return coverPath;
-                }
-            }
-        } catch (IOException ignored) {
-        }
-
-        boolean rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
-        if (!rendered || !Files.exists(coverPath)) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not render cover image for document: " + id);
-        }
-        return coverPath;
+    public List<DocumentDto> getRecentDocuments(int limit) {
+        return readingProgressService.getRecentDocuments(limit);
     }
 
-    public int clearCoverCache() {
-        Path coversDir = scannerService.getCoversPath();
-        if (!Files.exists(coversDir) || !Files.isDirectory(coversDir)) {
-            return 0;
-        }
-        int deleted = 0;
-        try (Stream<Path> files = Files.list(coversDir)) {
-            for (Path file : files.filter(Files::isRegularFile).toList()) {
-                if (file.getFileName().toString().toLowerCase().endsWith(".jpg")) {
-                    if (Files.deleteIfExists(file)) {
-                        deleted++;
-                    }
-                }
-            }
-        } catch (IOException ignored) {
-        }
-        return deleted;
+    @Transactional
+    public DocumentDto updateReadingProgress(UUID id, UpdateReadingProgressRequest request) {
+        return readingProgressService.updateReadingProgress(id, request);
     }
 
     @Transactional(readOnly = true)
+    public List<TocItemDto> getDocumentOutline(UUID id) {
+        Path pdfPath = getDocumentFilePath(id);
+        return pdfExtractionService.extractOutline(pdfPath);
+    }
+
+    // --- Cover Thumbnail Operations ---
+
+    @Transactional(readOnly = true)
+    public Path getOrCreateDocumentCover(UUID id) {
+        return coverThumbnailService.getOrCreateDocumentCover(id);
+    }
+
+    public int clearCoverCache() {
+        return coverThumbnailService.clearCoverCache();
+    }
+
+    // --- Tag Operations ---
+
+    @Transactional(readOnly = true)
     public List<TagDto> getAllTags() {
-        return tagRepository.findAllByOrderByNameAsc().stream()
-                .map(this::toTagDto)
-                .toList();
+        return tagService.getAllTags();
     }
 
     @Transactional
     public TagDto createTag(CreateTagRequest request) {
-        String cleanName = request.name().strip();
-        return tagRepository.findByNameIgnoreCase(cleanName)
-                .map(this::toTagDto)
-                .orElseGet(() -> {
-                    String color = (request.colorHex() != null && !request.colorHex().isBlank())
-                            ? request.colorHex().strip()
-                            : "#3b82f6";
-                    Tag saved = tagRepository.save(new Tag(cleanName, color));
-                    return toTagDto(saved);
-                });
+        return tagService.createTag(request);
     }
 
     @Transactional
     public void deleteTag(Long tagId) {
-        Tag tag = tagRepository.findById(tagId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tag not found: " + tagId));
-        List<Document> docsWithTag = documentRepository.findAll((root, query, cb) -> {
-            Join<Document, Tag> tagJoin = root.join("tags");
-            return cb.equal(tagJoin.get("id"), tagId);
-        });
-        for (Document doc : docsWithTag) {
-            if (doc.getTags().removeIf(t -> t.getId().equals(tagId))) {
-                documentRepository.save(doc);
-            }
-        }
-        tagRepository.delete(tag);
+        tagService.deleteTag(tagId);
     }
 
     @Transactional
     public DocumentDto addTagToDocument(UUID documentId, Long tagId) {
-        Document doc = findActiveDocumentOrThrow(documentId);
-        Tag tag = tagRepository.findById(tagId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tag not found: " + tagId));
-        doc.getTags().add(tag);
-        Document saved = documentRepository.save(doc);
-        return toDocumentDto(saved);
+        return tagService.addTagToDocument(documentId, tagId);
     }
 
     @Transactional
     public DocumentDto removeTagFromDocument(UUID documentId, Long tagId) {
-        Document doc = findActiveDocumentOrThrow(documentId);
-        doc.getTags().removeIf(t -> t.getId().equals(tagId));
-        Document saved = documentRepository.save(doc);
-        return toDocumentDto(saved);
+        return tagService.removeTagFromDocument(documentId, tagId);
     }
+
+    // --- Reading Note Operations ---
 
     @Transactional(readOnly = true)
     public List<ReadingNoteDto> getNotesForDocument(UUID documentId) {
-        findActiveDocumentOrThrow(documentId);
-        return noteRepository.findAllByDocumentIdOrderByPageNumberAscCreatedAtAsc(documentId).stream()
-                .map(this::toReadingNoteDto)
-                .toList();
+        return readingNoteService.getNotesForDocument(documentId);
     }
 
     @Transactional
     public ReadingNoteDto createNote(CreateNoteRequest request) {
-        Document doc = findActiveDocumentOrThrow(request.documentId());
-        ReadingNote note = new ReadingNote();
-        note.setDocument(doc);
-        note.setPageNumber(request.pageNumber());
-        note.setSelectedText(request.selectedText() != null ? request.selectedText() : "");
-        note.setNoteMarkdown(request.noteMarkdown());
-        note.setBoundingBoxJson(serializeBoundingBox(request.boundingBox()));
-
-        ReadingNote saved = noteRepository.save(note);
-        return toReadingNoteDto(saved);
+        return readingNoteService.createNote(request);
     }
 
     @Transactional
     public ReadingNoteDto updateNote(UUID noteId, UpdateNoteRequest request) {
-        ReadingNote note = noteRepository.findByIdWithDocument(noteId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading note not found: " + noteId));
-        if (request.selectedText() != null) {
-            note.setSelectedText(request.selectedText());
-        }
-        note.setNoteMarkdown(request.noteMarkdown());
-        if (request.boundingBox() != null) {
-            note.setBoundingBoxJson(serializeBoundingBox(request.boundingBox()));
-        }
-        ReadingNote saved = noteRepository.save(note);
-        return toReadingNoteDto(saved);
+        return readingNoteService.updateNote(noteId, request);
     }
 
     @Transactional
     public void deleteNote(UUID noteId) {
-        if (!noteRepository.existsById(noteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading note not found: " + noteId);
-        }
-        noteRepository.deleteById(noteId);
+        readingNoteService.deleteNote(noteId);
     }
 
     @Transactional(readOnly = true)
     public List<ReadingNoteDto> searchNotes(String query) {
-        String cleanQuery = query != null ? query.strip() : "";
-        return noteRepository.searchNotes(cleanQuery).stream()
-                .map(this::toReadingNoteDto)
-                .toList();
+        return readingNoteService.searchNotes(query);
     }
+
+    // --- Metadata Enrichment & Editing ---
 
     @Transactional
     public DocumentDto enrichDocumentMetadata(UUID id) {
@@ -461,7 +333,6 @@ public class LibraryManagementService {
         doc.setMetadataSource("MANUAL");
         doc.setMetadataEnrichedAt(Instant.now());
 
-        // If user provided a new DOI or ISBN and left title empty, optionally fetch via API
         if ((doc.getMetaTitle() == null || doc.getMetaTitle().isBlank()) && (doc.getDoi() != null || doc.getIsbn() != null)) {
             Path pdfPath = getDocumentFilePath(id);
             metadataEnrichmentService.enrichDocument(doc, pdfPath, null, true);
@@ -477,6 +348,7 @@ public class LibraryManagementService {
         int identifiersDetected = 0;
         int enriched = 0;
 
+        Path root = properties.rootDir().toAbsolutePath().normalize();
         for (Document doc : activeDocs) {
             if (!force && doc.getMetadataEnrichedAt() != null && !"MANUAL".equalsIgnoreCase(doc.getMetadataSource())) {
                 if (doc.getMetaTitle() != null && !doc.getMetaTitle().isBlank()) {
@@ -486,8 +358,8 @@ public class LibraryManagementService {
             if ("MANUAL".equalsIgnoreCase(doc.getMetadataSource()) && !force) {
                 continue;
             }
-            Path fullPath = scannerService.getRootPath().resolve(doc.getRelativePath()).normalize();
-            if (!fullPath.startsWith(scannerService.getRootPath()) || !Files.exists(fullPath)) {
+            Path fullPath = root.resolve(doc.getRelativePath()).normalize();
+            if (!fullPath.startsWith(root) || !Files.exists(fullPath)) {
                 continue;
             }
             scanned++;
@@ -509,90 +381,19 @@ public class LibraryManagementService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found: " + id));
     }
 
-    private Integer resolvePublicationYear(Document doc) {
-        if (doc.getPublicationYear() != null && doc.getPublicationYear() > 0) {
-            return doc.getPublicationYear();
-        }
-        return metadataEnrichmentService
-                .extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
-                .orElse(null);
-    }
-
     public DocumentDto toDocumentDto(Document doc) {
-        int noteCount = doc.getId() != null ? noteRepository.countByDocumentId(doc.getId()) : 0;
-        return toDocumentDto(doc, noteCount);
+        return mapper.toDocumentDto(doc);
     }
 
     public DocumentDto toDocumentDto(Document doc, int noteCount) {
-        List<TagDto> sortedTags = doc.getTags().stream()
-                .sorted(Comparator.comparing(Tag::getName, String.CASE_INSENSITIVE_ORDER))
-                .map(this::toTagDto)
-                .toList();
-        String metaTitle = doc.getMetaTitle();
-        if (metaTitle != null && fileNameCleaner.isJunkOrAdTitle(metaTitle)) {
-            metaTitle = null;
-        }
-        return new DocumentDto(
-                doc.getId(),
-                doc.getRelativePath(),
-                doc.getFileName(),
-                doc.getFileSizeBytes(),
-                doc.getPageCount(),
-                doc.getLastModifiedFs(),
-                doc.getCreatedAt(),
-                sortedTags,
-                doc.getReadingStatus(),
-                doc.getLastReadPage(),
-                doc.getLastOpenedAt(),
-                doc.getDoi(),
-                doc.getIsbn(),
-                metaTitle,
-                doc.getAuthors(),
-                resolvePublicationYear(doc),
-                doc.getAbstractText(),
-                doc.getMetadataSource(),
-                doc.getMetadataEnrichedAt(),
-                noteCount
-        );
+        return mapper.toDocumentDto(doc, noteCount);
     }
 
     public TagDto toTagDto(Tag tag) {
-        return new TagDto(tag.getId(), tag.getName(), tag.getColorHex());
+        return mapper.toTagDto(tag);
     }
 
     public ReadingNoteDto toReadingNoteDto(ReadingNote note) {
-        Document doc = note.getDocument();
-        return new ReadingNoteDto(
-                note.getId(),
-                doc.getId(),
-                doc.getFileName(),
-                doc.getRelativePath(),
-                note.getPageNumber(),
-                note.getSelectedText(),
-                note.getNoteMarkdown(),
-                deserializeBoundingBox(note.getBoundingBoxJson()),
-                note.getCreatedAt(),
-                note.getUpdatedAt()
-        );
-    }
-
-    private String serializeBoundingBox(BoundingBoxDto bbox) {
-        try {
-            return objectMapper.writeValueAsString(bbox);
-        } catch (JsonProcessingException e) {
-            return "{\"x1\":0.1,\"y1\":0.1,\"x2\":0.9,\"y2\":0.15}";
-        }
-    }
-
-    private BoundingBoxDto deserializeBoundingBox(String json) {
-        if (json == null || json.isBlank()) {
-            return new BoundingBoxDto(0.1, 0.1, 0.9, 0.15);
-        }
-        try {
-            return objectMapper.readValue(json, BoundingBoxDto.class);
-        } catch (JsonProcessingException e) {
-            return new BoundingBoxDto(0.1, 0.1, 0.9, 0.15);
-        }
+        return mapper.toReadingNoteDto(note);
     }
 }
-
