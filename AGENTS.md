@@ -120,22 +120,24 @@ Run from the repository root:
    - `Document` tracks `readingStatus` (`UNREAD`, `READING`, `COMPLETED`), `lastReadPage` (1-based), and `lastOpenedAt`.
    - Keep new columns on existing entities nullable in SQLite (with non-null Java defaults in getters) so Hibernate `ddl-auto: update` can execute `ALTER TABLE ... ADD COLUMN` cleanly on existing databases.
    - Endpoints: `PUT /api/documents/{id}/progress`, `GET /api/documents/recent`, and `GET /api/documents?status=...`.
-8. **Automatic Metadata Enrichment (`MetadataEnrichmentService`)**:
+8. **Automatic Metadata Enrichment (`MetadataEnrichmentService` & `MetadataProvider`)**:
    - Strictly non-destructive (never modifies PDF files on disk).
    - Automatically parses the first 1–3 pages (plus filename and `PDDocumentInformation`) for DOIs and checksum-validated ISBN-13 / ISBN-10 identifiers.
    - Extracts `publicationYear` from filename patterns such as `1.23` (`01.2023`), `12.24` (`12.2024`), or 4-digit years (`2021`), as well as directory segments such as `/2023` (`extractYearFromPathOrFileName`).
-   - Queries free open APIs (**CrossRef**, **Semantic Scholar**, **OpenLibrary**) for `metaTitle`, `authors`, `publicationYear`, and `abstractText` (configurable via `library.metadata-lookup-enabled` in `application.yml`).
+   - Pluggable `MetadataProvider` SPI with prioritized providers (`CrossRefMetadataProvider`, `SemanticScholarMetadataProvider`, `OpenLibraryMetadataProvider`), allowing modular additions (e.g. arXiv, DBLP, Google Books) without altering core services.
+   - External lookups are non-blocking and queued via `AsyncMetadataEnrichmentService` on a Java 21 Virtual Thread with rate limiting.
    - Endpoints: `POST /api/documents/{id}/enrich`, `PUT /api/documents/{id}/metadata`, and `POST /api/documents/enrich-all?force=...`.
 9. **Faceted Discovery & Filtered Lucene Search (`DocumentFilterCriteria` & `DocumentFacetsDto`)**:
    - `GET /api/documents` and `GET /api/search` accept faceted filter parameters: `path`, `tag` (single or comma-separated multi-tag), `status`, `minPages`, `maxPages`, `hasNotes`, `noteQuery` ("PDFs with notes about topic X"), `modifiedAfter`, `modifiedBefore`, `yearFrom`, `yearTo`, `hasMetadata`, `sortBy`, and `sortDir`.
    - `GET /api/documents/facets` computes live facet counts (status counts, `withNotesCount`, `totalNotesCount`, `withMetadataCount`, page buckets `1–20` / `21–100` / `101+`, min/max pages and publication years, and per-tag document counts).
    - In `SearchService`, active facets restrict fulltext Lucene queries via `TermInSetQuery(FIELD_DOC_ID, ...)` with `BooleanClause.Occur.FILTER` while preserving `UnifiedHighlighter` snippet highlighting on `FIELD_CONTENT`.
-10. **Local RAG via Ollama (`OllamaRagService` & `RagController`)**:
-   - Pure, strictly local, optional and non-blocking: The application remains 100% functional without Ollama running.
+10. **Local RAG & LLM Provider Abstraction (`OllamaRagService`, `RagController` & `LlmClient`)**:
+   - Pure, strictly local, optional and non-blocking: The application remains 100% functional without an LLM running.
    - Zero VRAM retrieval: Passages are retrieved on CPU via embedded Lucene BM25 scoring (`retrievePassages`), scoped either to a single `documentId` or the user's active faceted filters (`DocumentFilterCriteria`).
+   - Pluggable `LlmClient` SPI (`OllamaLlmClient`, `OpenAiCompatibleLlmClient` for LocalAI, vLLM, llama.cpp server, etc.) configurable via `library.rag.provider` (`ollama` or `openai`), with automatic fallback and optional API key support.
    - Default model: `qwen2.5:14b` (~9 GB VRAM, leaving ~3 GB for 16k context on a 12 GB GPU).
    - Endpoints: `GET /api/rag/status`, `POST /api/rag/ask`, and `POST /api/rag/stream` (SSE token & passage streaming via Java 21 Virtual Threads).
-   - When Ollama is offline or fails, retrieval passages are still returned gracefully with clear status information without throwing unhandled errors.
+   - When the LLM backend is offline or fails, retrieval passages are still returned gracefully with clear status information without throwing unhandled errors.
 
 ### Frontend Rules
 1. **Build Artifacts**:

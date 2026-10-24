@@ -1,7 +1,5 @@
 package com.pdforever.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pdforever.config.LibraryProperties;
 import com.pdforever.domain.Document;
 import com.pdforever.dto.DocumentFilterCriteria;
@@ -10,6 +8,9 @@ import com.pdforever.dto.RagPassageDto;
 import com.pdforever.dto.RagQueryRequest;
 import com.pdforever.dto.RagResponseDto;
 import com.pdforever.repository.DocumentRepository;
+import com.pdforever.service.rag.client.LlmClient;
+import com.pdforever.service.rag.client.LlmRequest;
+import com.pdforever.service.rag.client.LlmResponse;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -20,14 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -43,8 +36,7 @@ public class OllamaRagService {
     private final DocumentRepository documentRepository;
     private final LibraryManagementService libraryManagementService;
     private final FileNameCleaner fileNameCleaner;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final List<LlmClient> llmClients;
 
     public OllamaRagService(
             LibraryProperties properties,
@@ -52,52 +44,48 @@ public class OllamaRagService {
             DocumentRepository documentRepository,
             LibraryManagementService libraryManagementService,
             FileNameCleaner fileNameCleaner,
-            ObjectMapper objectMapper
+            List<LlmClient> llmClients
     ) {
         this.properties = properties;
         this.luceneIndexService = luceneIndexService;
         this.documentRepository = documentRepository;
         this.libraryManagementService = libraryManagementService;
         this.fileNameCleaner = fileNameCleaner;
-        this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        this.llmClients = llmClients != null ? llmClients : List.of();
+    }
+
+    public LlmClient resolveLlmClient() {
+        String configuredProvider = (properties.rag() != null && properties.rag().provider() != null)
+                ? properties.rag().provider().toLowerCase(Locale.ROOT).strip()
+                : "ollama";
+
+        for (LlmClient client : llmClients) {
+            if (client.getProviderType().equalsIgnoreCase(configuredProvider)) {
+                return client;
+            }
+        }
+        if (configuredProvider.contains("openai") || configuredProvider.contains("vllm")
+                || configuredProvider.contains("localai") || configuredProvider.contains("llama")) {
+            for (LlmClient client : llmClients) {
+                if ("openai".equalsIgnoreCase(client.getProviderType())) {
+                    return client;
+                }
+            }
+        }
+        return llmClients.stream()
+                .filter(c -> "ollama".equalsIgnoreCase(c.getProviderType()))
+                .findFirst()
+                .orElseGet(() -> !llmClients.isEmpty() ? llmClients.get(0) : null);
     }
 
     public OllamaStatusDto checkOllamaStatus(String customOllamaUrl) {
         String url = resolveOllamaUrl(customOllamaUrl);
         boolean enabled = properties.rag() != null && properties.rag().enabled();
-        String currentModel = properties.rag() != null ? properties.rag().model() : "qwen2.5:14b";
+        String currentModel = resolveModel(null);
 
-        try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url + "/api/tags"))
-                    .timeout(Duration.ofSeconds(2))
-                    .GET()
-                    .build();
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (res.statusCode() == 200 && res.body() != null) {
-                JsonNode root = objectMapper.readTree(res.body());
-                JsonNode modelsArr = root.path("models");
-                List<String> installed = new ArrayList<>();
-                if (modelsArr.isArray()) {
-                    for (JsonNode m : modelsArr) {
-                        String name = m.path("name").asText(null);
-                        if (name != null) installed.add(name);
-                    }
-                }
-                return new OllamaStatusDto(
-                        enabled,
-                        true,
-                        url,
-                        currentModel,
-                        installed,
-                        "Ollama ist online und einsatzbereit (" + installed.size() + " Modelle installiert)."
-                );
-            }
-        } catch (Exception e) {
-            log.debug("Ollama status check failed on {}: {}", url, e.getMessage());
+        LlmClient client = resolveLlmClient();
+        if (client != null) {
+            return client.checkStatus(url, currentModel, enabled);
         }
 
         return new OllamaStatusDto(
@@ -106,7 +94,7 @@ public class OllamaRagService {
                 url,
                 currentModel,
                 Collections.emptyList(),
-                "Ollama ist offline (" + url + "). RAG ist optional. Starte Ollama z. B. mit 'ollama run qwen2.5:14b'."
+                "Kein LLM-Provider konfiguriert."
         );
     }
 
@@ -136,49 +124,27 @@ public class OllamaRagService {
         }
 
         String model = resolveModel(request.model());
-        String ollamaUrl = resolveOllamaUrl(null);
+        String url = resolveOllamaUrl(null);
         String prompt = buildRagPrompt(query, passages, request.documentId() != null);
+        String apiKey = properties.rag() != null ? properties.rag().apiKey() : null;
 
-        try {
-            Map<String, Object> payload = Map.of(
-                    "model", model,
-                    "prompt", prompt,
-                    "stream", false,
-                    "options", Map.of(
-                            "temperature", 0.1,
-                            "top_p", 0.9
-                    )
-            );
-
-            HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
-                    .build();
-
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (res.statusCode() == 200 && res.body() != null) {
-                JsonNode json = objectMapper.readTree(res.body());
-                String answer = json.path("response").asText("");
-                return new RagResponseDto(answer.strip(), passages, model, true, null);
-            } else {
-                return new RagResponseDto(
-                        null,
-                        passages,
-                        model,
-                        false,
-                        "Ollama API-Fehler (HTTP " + res.statusCode() + "): " + res.body()
-                );
-            }
-        } catch (Exception e) {
-            log.warn("Ollama RAG request failed: {}", e.getMessage());
+        LlmClient client = resolveLlmClient();
+        if (client == null) {
             return new RagResponseDto(
                     null,
                     passages,
                     model,
                     false,
-                    "Ollama ist nicht erreichbar (" + ollamaUrl + "). Starte Ollama z. B. mit 'ollama run " + model + "'."
+                    "Kein LLM-Client verfügbar."
             );
+        }
+
+        LlmRequest llmReq = new LlmRequest(url, model, prompt, 0.1, 0.9, apiKey);
+        LlmResponse llmRes = client.generate(llmReq);
+        if (llmRes.success()) {
+            return new RagResponseDto(llmRes.text(), passages, model, true, null);
+        } else {
+            return new RagResponseDto(null, passages, model, false, llmRes.errorMessage());
         }
     }
 
@@ -207,53 +173,19 @@ public class OllamaRagService {
         }
 
         String model = resolveModel(request.model());
-        String ollamaUrl = resolveOllamaUrl(null);
+        String url = resolveOllamaUrl(null);
         String prompt = buildRagPrompt(query, passages, request.documentId() != null);
+        String apiKey = properties.rag() != null ? properties.rag().apiKey() : null;
 
-        try {
-            Map<String, Object> payload = Map.of(
-                    "model", model,
-                    "prompt", prompt,
-                    "stream", true,
-                    "options", Map.of(
-                            "temperature", 0.1,
-                            "top_p", 0.9
-                    )
-            );
-
-            HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(120))
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
-                    .build();
-
-            HttpResponse<java.io.InputStream> res = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
-            if (res.statusCode() != 200) {
-                errorConsumer.accept("Ollama HTTP " + res.statusCode());
-                doneCallback.run();
-                return;
-            }
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (line.isBlank()) continue;
-                    JsonNode node = objectMapper.readTree(line);
-                    String token = node.path("response").asText("");
-                    if (!token.isEmpty()) {
-                        tokenConsumer.accept(token);
-                    }
-                    if (node.path("done").asBoolean(false)) {
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Ollama streaming error: {}", e.getMessage());
-            errorConsumer.accept("Ollama nicht erreichbar (" + ollamaUrl + "). Starte Ollama z. B. mit 'ollama run " + model + "'.");
-        } finally {
+        LlmClient client = resolveLlmClient();
+        if (client == null) {
+            errorConsumer.accept("Kein LLM-Client verfügbar.");
             doneCallback.run();
+            return;
         }
+
+        LlmRequest llmReq = new LlmRequest(url, model, prompt, 0.1, 0.9, apiKey);
+        client.streamGenerate(llmReq, tokenConsumer, errorConsumer, doneCallback);
     }
 
     public List<RagPassageDto> retrievePassages(

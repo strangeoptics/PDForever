@@ -20,8 +20,14 @@ public record LibraryProperties(
             boolean enabled,
             String ollamaUrl,
             String model,
-            int maxPassages
+            int maxPassages,
+            String provider,
+            String apiKey
     ) {
+        public RagProperties(boolean enabled, String ollamaUrl, String model, int maxPassages) {
+            this(enabled, ollamaUrl, model, maxPassages, "ollama", null);
+        }
+
         public RagProperties {
             if (ollamaUrl == null || ollamaUrl.isBlank()) {
                 ollamaUrl = "http://localhost:11434";
@@ -31,6 +37,9 @@ public record LibraryProperties(
             }
             if (maxPassages <= 0) {
                 maxPassages = 6;
+            }
+            if (provider == null || provider.isBlank()) {
+                provider = "ollama";
             }
         }
     }
