@@ -108,8 +108,18 @@ public class FileNameCleaner {
             return rawFileName;
         }
 
-        boolean hasPdfExt = rawFileName.toLowerCase().endsWith(".pdf");
-        String stem = hasPdfExt ? rawFileName.substring(0, rawFileName.length() - 4) : rawFileName;
+        String ext = "";
+        String lower = rawFileName.toLowerCase(Locale.ROOT);
+        int lastDot = rawFileName.lastIndexOf('.');
+        if (lastDot > 0 && lastDot < rawFileName.length() - 1) {
+            String candidateExt = lower.substring(lastDot);
+            if (candidateExt.equals(".pdf") || candidateExt.equals(".epub") || candidateExt.equals(".mobi")
+                    || candidateExt.equals(".azw") || candidateExt.equals(".azw3")) {
+                ext = candidateExt;
+            }
+        }
+
+        String stem = !ext.isEmpty() ? rawFileName.substring(0, rawFileName.length() - ext.length()) : rawFileName;
 
         // 1. Remove literal substrings (case-insensitive) including leading separators
         for (String literal : removeLiterals) {
@@ -132,6 +142,6 @@ public class FileNameCleaner {
             return rawFileName;
         }
 
-        return hasPdfExt ? stem + ".pdf" : stem;
+        return !ext.isEmpty() ? stem + ext : stem;
     }
 }

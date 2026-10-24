@@ -159,7 +159,7 @@ public class EpubExtractionService {
                 if (opfEntry != null) {
                     try (InputStream is = zipFile.getInputStream(opfEntry)) {
                         Document opfDoc = parseXml(is);
-                        coverHref = findCoverHref(opfDoc);
+                        coverHref = findCoverHref(opfDoc, zipFile, opfDir);
                     } catch (Exception e) {
                         log.debug("Could not parse OPF for cover href: {}", e.getMessage());
                     }
@@ -506,13 +506,15 @@ public class EpubExtractionService {
         return null;
     }
 
-    private String findCoverHref(Document opfDoc) {
-        // 1. Check properties="cover-image"
+    private String findCoverHref(Document opfDoc, ZipFile zipFile, String opfDir) {
         NodeList items = opfDoc.getElementsByTagName("item");
+
+        // 1. Check properties="cover-image" with image media-type
         for (int i = 0; i < items.getLength(); i++) {
             Element item = (Element) items.item(i);
             String props = item.getAttribute("properties");
-            if (props != null && props.contains("cover-image")) {
+            String mediaType = item.getAttribute("media-type");
+            if (props != null && props.contains("cover-image") && mediaType != null && mediaType.startsWith("image/")) {
                 return item.getAttribute("href");
             }
         }
@@ -526,18 +528,24 @@ public class EpubExtractionService {
                 for (int j = 0; j < items.getLength(); j++) {
                     Element item = (Element) items.item(j);
                     if (coverId.equals(item.getAttribute("id"))) {
-                        return item.getAttribute("href");
+                        String mediaType = item.getAttribute("media-type");
+                        if (mediaType != null && mediaType.startsWith("image/")) {
+                            return item.getAttribute("href");
+                        }
                     }
                 }
             }
         }
 
-        // 3. Check item id="cover" or id="cover-image"
+        // 3. Check item id="cover-image" or id containing "cover" (strictly matching image/ media-type)
         for (int i = 0; i < items.getLength(); i++) {
             Element item = (Element) items.item(i);
             String id = item.getAttribute("id");
-            if ("cover".equalsIgnoreCase(id) || "cover-image".equalsIgnoreCase(id)) {
-                return item.getAttribute("href");
+            String mediaType = item.getAttribute("media-type");
+            if (mediaType != null && mediaType.startsWith("image/")) {
+                if ("cover-image".equalsIgnoreCase(id) || "cover".equalsIgnoreCase(id) || id.toLowerCase(Locale.ROOT).contains("cover")) {
+                    return item.getAttribute("href");
+                }
             }
         }
 
@@ -551,6 +559,69 @@ public class EpubExtractionService {
             }
         }
 
+        // 5. Check if there is an item id="cover" that is an XHTML document (e.g. cover.xhtml) and extract the img src from it
+        for (int i = 0; i < items.getLength(); i++) {
+            Element item = (Element) items.item(i);
+            String id = item.getAttribute("id");
+            String href = item.getAttribute("href");
+            String mediaType = item.getAttribute("media-type");
+            if ("cover".equalsIgnoreCase(id) && mediaType != null && (mediaType.contains("xhtml") || mediaType.contains("html"))) {
+                String imgHref = extractImageFromCoverHtml(zipFile, opfDir, href);
+                if (imgHref != null) {
+                    return imgHref;
+                }
+            }
+        }
+
+        // 6. Check for image with "U1" or "titlepage" or "front" in href or id
+        for (int i = 0; i < items.getLength(); i++) {
+            Element item = (Element) items.item(i);
+            String mediaType = item.getAttribute("media-type");
+            String href = item.getAttribute("href");
+            String id = item.getAttribute("id");
+            if (mediaType != null && mediaType.startsWith("image/")) {
+                String lower = (href + " " + id).toLowerCase(Locale.ROOT);
+                if (lower.contains("u1") || lower.contains("titlepage") || lower.contains("front")) {
+                    return href;
+                }
+            }
+        }
+
+        // 7. Fallback: return the first image item in the manifest
+        for (int i = 0; i < items.getLength(); i++) {
+            Element item = (Element) items.item(i);
+            String mediaType = item.getAttribute("media-type");
+            if (mediaType != null && mediaType.startsWith("image/")) {
+                return item.getAttribute("href");
+            }
+        }
+
+        return null;
+    }
+
+    private String extractImageFromCoverHtml(ZipFile zipFile, String opfDir, String coverHtmlHref) {
+        try {
+            String fullPath = resolveRelativePath(opfDir, coverHtmlHref);
+            ZipEntry entry = findZipEntryIgnoreCase(zipFile, fullPath);
+            if (entry == null) return null;
+
+            String html;
+            try (InputStream is = zipFile.getInputStream(entry)) {
+                html = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            Matcher matcher = IMG_SRC_PATTERN.matcher(html);
+            if (matcher.find()) {
+                String src = matcher.group(2);
+                String coverDir = getParentPath(fullPath);
+                String resolved = resolveRelativePath(coverDir, src);
+                if (!opfDir.isEmpty() && resolved.startsWith(opfDir + "/")) {
+                    return resolved.substring(opfDir.length() + 1);
+                }
+                return resolved;
+            }
+        } catch (Exception e) {
+            log.debug("Failed extracting image from cover HTML: {}", e.getMessage());
+        }
         return null;
     }
 

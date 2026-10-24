@@ -234,7 +234,10 @@ public class LibraryManagementService {
     public List<TocItemDto> getDocumentOutline(UUID id) {
         Document doc = findActiveDocumentOrThrow(id);
         Path filePath = getDocumentFilePath(id);
-        if (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub")) {
+        boolean isEpub = "EPUB".equalsIgnoreCase(doc.getFormat())
+                || (doc.getRelativePath() != null && doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".epub"))
+                || (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub"));
+        if (isEpub) {
             return epubExtractionService.extractOutline(filePath);
         }
         return pdfExtractionService.extractOutline(filePath);

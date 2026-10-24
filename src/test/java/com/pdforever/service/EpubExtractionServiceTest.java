@@ -73,6 +73,24 @@ class EpubExtractionServiceTest {
         assertThat(resourceBytes).isNotEmpty();
     }
 
+    @Test
+    void testRealEpubCoverExtraction() throws IOException {
+        Path realPath = Path.of("storage/books/topics/identity/Der freie Mensch Die zeitgemäße Übersetzung von Atlas -- Ayn Rand -- München, 2021 -- thinkum Verlag -- 9783949522024 -- f9b114382a2bc5bf3330eae4028344dc -- Anna’s Archive.epub");
+        if (!Files.exists(realPath)) {
+            try (var stream = Files.walk(Path.of("storage"))) {
+                realPath = stream.filter(p -> p.getFileName().toString().contains("Der freie Mensch")).findFirst().orElse(null);
+            }
+        }
+        if (realPath != null && Files.exists(realPath)) {
+            Path target = tempDir.resolve("real_cover.jpg");
+            boolean rendered = service.renderCoverImage(realPath, target);
+            BufferedImage img = ImageIO.read(target.toFile());
+            System.out.println("Rendered: " + rendered + ", size: " + (Files.exists(target) ? Files.size(target) : 0) + ", dim: " + img.getWidth() + "x" + img.getHeight());
+            assertThat(rendered).isTrue();
+            assertThat(Files.exists(target)).isTrue();
+        }
+    }
+
     private Path createSampleEpub(Path path) throws IOException {
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(path.toFile()), StandardCharsets.UTF_8)) {
             // mimetype

@@ -77,8 +77,12 @@ public class CoverThumbnailService {
         } catch (IOException ignored) {
         }
 
+        boolean isEpub = "EPUB".equalsIgnoreCase(doc.getFormat())
+                || (doc.getRelativePath() != null && doc.getRelativePath().toLowerCase(Locale.ROOT).endsWith(".epub"))
+                || (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub"));
+
         boolean rendered;
-        if (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub")) {
+        if (isEpub) {
             rendered = epubExtractionService.renderCoverImage(pdfPath, coverPath);
         } else {
             rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
