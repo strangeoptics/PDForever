@@ -421,6 +421,11 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
       setSelectionData(null);
       return;
     }
+    // Verify selection is within the reader content container
+    if (contentRef.current && !contentRef.current.contains(sel.anchorNode)) {
+      setSelectionData(null);
+      return;
+    }
     try {
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
@@ -428,8 +433,8 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
       setSelectionData({
         text,
         rect: {
-          top: rect.top - containerRect.top + containerRef.current.scrollTop - 42,
-          left: Math.max(10, rect.left - containerRect.left + rect.width / 2 - 60),
+          top: Math.max(10, rect.top - containerRect.top + containerRef.current.scrollTop - 44),
+          left: Math.max(70, Math.min(containerRect.width - 70, rect.left - containerRect.left + rect.width / 2)),
         },
       });
     } catch {
@@ -439,14 +444,32 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
 
   const handleCreateNoteFromSelection = () => {
     if (!selectionData) return;
+    const textToSave = selectionData.text;
     onRequestCreateNote({
       documentId: docItem.id,
       pageNumber: currentChapter,
-      selectedText: selectionData.text,
+      selectedText: textToSave,
       boundingBox: { x1: 0, y1: 0, x2: 0, y2: 0 },
     });
+    window.getSelection()?.removeAllRanges();
     setSelectionData(null);
   };
+
+  // Dismiss selection popup if user clicks elsewhere outside the button
+  useEffect(() => {
+    if (!selectionData) return;
+    const handleDocumentMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('.epub-floating-note-btn')) {
+        return;
+      }
+      setSelectionData(null);
+    };
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentMouseDown);
+    };
+  }, [selectionData]);
 
   const currentChapterTitle = useMemo(() => {
     if (!chapters.length) return `Kapitel ${currentChapter}`;
@@ -713,15 +736,27 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
         {/* Floating selection tooltip for creating notes */}
         {selectionData && (
           <div
-            className="absolute z-30 transform -translate-x-1/2 flex items-center gap-1.5 bg-slate-900/95 text-white border border-indigo-500/50 rounded-lg px-2.5 py-1.5 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-indigo-600 transition-all text-xs"
             style={{
+              position: 'absolute',
               top: `${selectionData.rect.top}px`,
               left: `${selectionData.rect.left}px`,
+              transform: 'translateX(-50%)',
+              zIndex: 40,
             }}
-            onClick={handleCreateNoteFromSelection}
+            className="epub-floating-note-btn animate-in fade-in zoom-in-95 duration-100"
           >
-            <Highlighter size={13} className="text-amber-400" />
-            <span className="font-medium">Lesezettel erstellen</span>
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCreateNoteFromSelection();
+              }}
+              className="flex items-center gap-1.5 bg-slate-900/95 hover:bg-indigo-600 text-white border border-indigo-500/50 rounded-lg px-3 py-1.5 shadow-xl backdrop-blur-sm cursor-pointer transition-all text-xs font-medium"
+            >
+              <Highlighter size={13} className="text-amber-400" />
+              <span>Lesezettel erstellen</span>
+            </button>
           </div>
         )}
 
