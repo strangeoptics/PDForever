@@ -64,12 +64,26 @@ export interface DocumentItem {
   metadataSource?: string | null;
   metadataEnrichedAt?: string | null;
   noteCount?: number;
+  format?: 'PDF' | 'EPUB' | 'MOBI' | 'AZW';
+}
+
+export interface EpubChapterItem {
+  index: number;
+  id: string;
+  href: string;
+  title: string;
+}
+
+export function isEpubDocument(doc?: { format?: string; fileName?: string } | null): boolean {
+  if (!doc) return false;
+  if (doc.format === 'EPUB') return true;
+  return (doc.fileName || '').toLowerCase().endsWith('.epub');
 }
 
 export function formatDocTitle(doc: { metaTitle?: string | null; fileName: string }): string {
   const title = doc.metaTitle?.trim();
   if (title) return title;
-  return doc.fileName.replace(/\.pdf$/i, '');
+  return doc.fileName.replace(/\.(pdf|epub|mobi|azw|azw3)$/i, '');
 }
 
 export interface DocumentFilterParams {

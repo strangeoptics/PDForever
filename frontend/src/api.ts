@@ -3,6 +3,7 @@ import {
   DocumentFacets,
   DocumentFilterParams,
   DocumentItem,
+  EpubChapterItem,
   MetadataEnrichmentReport,
   OllamaStatus,
   PaginatedResponse,
@@ -89,6 +90,17 @@ export const api = {
 
   getDocumentOutline(id: string): Promise<TocItem[]> {
     return fetch(`${API_BASE}/documents/${id}/outline`).then(handleJson<TocItem[]>);
+  },
+
+  getEpubChapters(id: string): Promise<EpubChapterItem[]> {
+    return fetch(`${API_BASE}/documents/${id}/epub/chapters`).then(handleJson<EpubChapterItem[]>);
+  },
+
+  getEpubChapterHtml(id: string, index = 1): Promise<string> {
+    return fetch(`${API_BASE}/documents/${id}/epub/chapter?index=${index}`).then((res) => {
+      if (!res.ok) throw new Error(`Failed to load EPUB chapter: ${res.status}`);
+      return res.text();
+    });
   },
 
   updateReadingProgress(id: string, payload: UpdateReadingProgressPayload): Promise<DocumentItem> {

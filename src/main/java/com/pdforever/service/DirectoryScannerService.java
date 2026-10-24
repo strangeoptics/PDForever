@@ -30,6 +30,7 @@ public class DirectoryScannerService {
     private final CoverThumbnailService coverThumbnailService;
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
+    private final EpubExtractionService epubExtractionService;
     private final LuceneIndexService luceneIndexService;
     private final FileNameCleaner fileNameCleaner;
     private final MetadataEnrichmentService metadataEnrichmentService;
@@ -41,6 +42,7 @@ public class DirectoryScannerService {
             CoverThumbnailService coverThumbnailService,
             DocumentRepository documentRepository,
             PdfExtractionService pdfExtractionService,
+            EpubExtractionService epubExtractionService,
             LuceneIndexService luceneIndexService,
             FileNameCleaner fileNameCleaner,
             MetadataEnrichmentService metadataEnrichmentService,
@@ -51,6 +53,7 @@ public class DirectoryScannerService {
         this.coverThumbnailService = coverThumbnailService;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
+        this.epubExtractionService = epubExtractionService;
         this.luceneIndexService = luceneIndexService;
         this.fileNameCleaner = fileNameCleaner;
         this.metadataEnrichmentService = metadataEnrichmentService;
@@ -92,7 +95,7 @@ public class DirectoryScannerService {
 
         try (Stream<Path> walk = Files.walk(root)) {
             walk.filter(Files::isRegularFile)
-                    .filter(this::isPdfFile)
+                    .filter(this::isSupportedDocument)
                     .sorted()
                     .forEach(path -> discoveredPdfs.put(toRelativePath(path), path));
         } catch (IOException e) {
@@ -179,7 +182,7 @@ public class DirectoryScannerService {
     }
 
     public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath, boolean commitImmediately) {
-        if (!Files.exists(filePath) || !Files.isRegularFile(filePath) || !isPdfFile(filePath)) {
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath) || !isSupportedDocument(filePath)) {
             return IngestionOutcome.SKIPPED_ERROR;
         }
 
@@ -222,50 +225,120 @@ public class DirectoryScannerService {
                     return IngestionOutcome.UNCHANGED;
                 }
 
-                PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
-                if (!extracted.valid()) {
-                    log.warn("Skipping corrupt modified PDF: {}", relPath);
-                    return IngestionOutcome.SKIPPED_ERROR;
+                Document targetDoc = existing;
+                boolean isNew = false;
+                List<String> pageTexts;
+                int pageCount;
+
+                if (isEpubFile(filePath)) {
+                    EpubExtractionService.ExtractedEpubData epubData = epubExtractionService.extractEpubData(filePath);
+                    if (!epubData.valid()) {
+                        log.warn("Skipping corrupt modified EPUB: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = epubData.chapterCount();
+                    pageTexts = epubData.chapterTexts();
+                    targetDoc.setFormat("EPUB");
+                    if (epubData.title() != null && !epubData.title().isBlank()) {
+                        targetDoc.setMetaTitle(epubData.title());
+                    }
+                    if (epubData.authors() != null && !epubData.authors().isBlank()) {
+                        targetDoc.setAuthors(epubData.authors());
+                    }
+                    if (epubData.publicationYear() != null) {
+                        targetDoc.setPublicationYear(epubData.publicationYear());
+                    }
+                    if (epubData.description() != null && !epubData.description().isBlank()) {
+                        targetDoc.setAbstractText(epubData.description());
+                    }
+                    if (epubData.identifier() != null) {
+                        metadataEnrichmentService.extractIsbn(epubData.identifier()).ifPresent(targetDoc::setIsbn);
+                        metadataEnrichmentService.extractDoi(epubData.identifier()).ifPresent(targetDoc::setDoi);
+                    }
+                    targetDoc.setMetadataSource("EPUB_METADATA");
+                } else {
+                    PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
+                    if (!extracted.valid()) {
+                        log.warn("Skipping corrupt modified PDF: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = extracted.pageCount();
+                    pageTexts = extracted.pageTexts();
+                    targetDoc.setFormat("PDF");
                 }
 
-                existing.setFileName(fileName);
-                existing.setFileSizeBytes(fileSize);
-                existing.setPageCount(extracted.pageCount());
-                existing.setLastModifiedFs(lastModifiedFs);
-                existing.setDeleted(false);
-                metadataEnrichmentService.enrichDocument(existing, filePath, extracted.pageTexts(), false, false);
-                Document saved = documentRepository.save(existing);
+                targetDoc.setFileName(fileName);
+                targetDoc.setFileSizeBytes(fileSize);
+                targetDoc.setPageCount(pageCount);
+                targetDoc.setLastModifiedFs(lastModifiedFs);
+                targetDoc.setDeleted(false);
+                metadataEnrichmentService.enrichDocument(targetDoc, filePath, pageTexts, false, false);
+                Document saved = documentRepository.save(targetDoc);
                 if (saved.getDoi() != null || saved.getIsbn() != null) {
                     asyncMetadataEnrichmentService.enqueue(saved.getId());
                 }
 
                 deleteCachedCover(saved.getId());
-                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
-                log.info("Re-indexed modified PDF: {} ({} pages, commitImmediately={})", relPath, extracted.pageCount(), commitImmediately);
+                luceneIndexService.indexDocumentPages(saved, pageTexts, commitImmediately);
+                log.info("Re-indexed modified document: {} ({} pages/chapters, commitImmediately={})", relPath, pageCount, commitImmediately);
                 return IngestionOutcome.UPDATED;
             } else {
-                PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
-                if (!extracted.valid()) {
-                    log.warn("Skipping corrupt new PDF: {}", relPath);
-                    return IngestionOutcome.SKIPPED_ERROR;
-                }
-
                 Document newDoc = new Document();
                 newDoc.setRelativePath(relPath);
+                newDoc.setCreatedAt(Instant.now());
+                List<String> pageTexts;
+                int pageCount;
+
+                if (isEpubFile(filePath)) {
+                    EpubExtractionService.ExtractedEpubData epubData = epubExtractionService.extractEpubData(filePath);
+                    if (!epubData.valid()) {
+                        log.warn("Skipping corrupt new EPUB: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = epubData.chapterCount();
+                    pageTexts = epubData.chapterTexts();
+                    newDoc.setFormat("EPUB");
+                    if (epubData.title() != null && !epubData.title().isBlank()) {
+                        newDoc.setMetaTitle(epubData.title());
+                    }
+                    if (epubData.authors() != null && !epubData.authors().isBlank()) {
+                        newDoc.setAuthors(epubData.authors());
+                    }
+                    if (epubData.publicationYear() != null) {
+                        newDoc.setPublicationYear(epubData.publicationYear());
+                    }
+                    if (epubData.description() != null && !epubData.description().isBlank()) {
+                        newDoc.setAbstractText(epubData.description());
+                    }
+                    if (epubData.identifier() != null) {
+                        metadataEnrichmentService.extractIsbn(epubData.identifier()).ifPresent(newDoc::setIsbn);
+                        metadataEnrichmentService.extractDoi(epubData.identifier()).ifPresent(newDoc::setDoi);
+                    }
+                    newDoc.setMetadataSource("EPUB_METADATA");
+                } else {
+                    PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
+                    if (!extracted.valid()) {
+                        log.warn("Skipping corrupt new PDF: {}", relPath);
+                        return IngestionOutcome.SKIPPED_ERROR;
+                    }
+                    pageCount = extracted.pageCount();
+                    pageTexts = extracted.pageTexts();
+                    newDoc.setFormat("PDF");
+                }
+
                 newDoc.setFileName(fileName);
                 newDoc.setFileSizeBytes(fileSize);
-                newDoc.setPageCount(extracted.pageCount());
+                newDoc.setPageCount(pageCount);
                 newDoc.setLastModifiedFs(lastModifiedFs);
-                newDoc.setCreatedAt(Instant.now());
                 newDoc.setDeleted(false);
-                metadataEnrichmentService.enrichDocument(newDoc, filePath, extracted.pageTexts(), false, false);
+                metadataEnrichmentService.enrichDocument(newDoc, filePath, pageTexts, false, false);
 
                 Document saved = documentRepository.save(newDoc);
                 if (saved.getDoi() != null || saved.getIsbn() != null) {
                     asyncMetadataEnrichmentService.enqueue(saved.getId());
                 }
-                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
-                log.info("Indexed new PDF: {} ({} pages, commitImmediately={})", relPath, extracted.pageCount(), commitImmediately);
+                luceneIndexService.indexDocumentPages(saved, pageTexts, commitImmediately);
+                log.info("Indexed new document: {} ({} pages/chapters, commitImmediately={})", relPath, pageCount, commitImmediately);
                 return IngestionOutcome.ADDED;
             }
         } catch (IOException e) {
@@ -303,6 +376,16 @@ public class DirectoryScannerService {
 
     private void deleteCachedCover(UUID docId) {
         coverThumbnailService.deleteCachedCover(docId);
+    }
+
+    public boolean isSupportedDocument(Path path) {
+        String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase(Locale.ROOT) : "";
+        return name.endsWith(".pdf") || name.endsWith(".epub");
+    }
+
+    public boolean isEpubFile(Path path) {
+        String name = path.getFileName() != null ? path.getFileName().toString().toLowerCase(Locale.ROOT) : "";
+        return name.endsWith(".epub");
     }
 
     public boolean isPdfFile(Path path) {
@@ -346,8 +429,11 @@ public class DirectoryScannerService {
             }
 
             String displayName = item.getFileName() != null ? item.getFileName() : segments[segments.length - 1];
-            if (displayName.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+            String lower = displayName.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".pdf")) {
                 displayName = displayName.substring(0, displayName.length() - 4);
+            } else if (lower.endsWith(".epub")) {
+                displayName = displayName.substring(0, displayName.length() - 5);
             }
 
             currentDir.files.add(new TreeNodeDto(

@@ -24,7 +24,8 @@ public record DocumentDto(
         String abstractText,
         String metadataSource,
         Instant metadataEnrichedAt,
-        int noteCount
+        int noteCount,
+        String format
 ) {
 }
 

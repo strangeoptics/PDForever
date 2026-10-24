@@ -32,7 +32,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.attribute.FileTime;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.time.Instant;
 import java.util.List;
 
@@ -328,6 +332,143 @@ class IngestionAndSearchIntegrationTest {
                 "Archiv/2024/Heft_Sonderausgabe.pdf",
                 "Heft_Sonderausgabe.pdf"
         )).contains(2024);
+    }
+
+    @Test
+    void testEpubIngestionSearchAndOutlinePipeline() throws Exception {
+        Path rootDir = libraryProperties.rootDir();
+        Path epubFolder = rootDir.resolve("Ebooks/Fiction");
+        Files.createDirectories(epubFolder);
+
+        Path epubFile = epubFolder.resolve("cyberpunk_odyssey.epub");
+        createSampleEpub(epubFile, "Cyberpunk Odyssey", "Neuromancer Author", List.of(
+                "In the neon sprawl of Night City, data runners hack into cyberspace grids.",
+                "The orbital colony was cold, dark, and filled with rogue artificial intelligences."
+        ));
+
+        // Reconcile
+        scannerService.reconcileLibrary();
+
+        // 1. Verify EPUB Document entity in DB
+        Document doc = documentRepository.findByRelativePath("Ebooks/Fiction/cyberpunk_odyssey.epub").orElseThrow();
+        assertThat(doc.getFormat()).isEqualTo("EPUB");
+        assertThat(doc.getMetaTitle()).isEqualTo("Cyberpunk Odyssey");
+        assertThat(doc.getAuthors()).isEqualTo("Neuromancer Author");
+        assertThat(doc.getPageCount()).isEqualTo(2);
+
+        // 2. Verify tree endpoint shows clean title without .epub
+        TreeNodeDto tree = scannerService.buildDirectoryTree();
+        assertThat(tree.toString()).contains("cyberpunk_odyssey");
+
+        // 3. Verify Lucene search inside EPUB chapter
+        List<SearchResultGroupDto> results = searchService.search("cyberspace");
+        assertThat(results).isNotEmpty();
+        assertThat(results.get(0).relPath()).isEqualTo("Ebooks/Fiction/cyberpunk_odyssey.epub");
+
+        // 4. Verify Outline / TOC endpoint
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/outline"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].title").value("Kapitel 1"))
+                .andExpect(jsonPath("$[0].pageNumber").value(1));
+
+        // 5. Verify EPUB Chapters endpoint
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/epub/chapters"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].index").value(1));
+
+        // 6. Verify Chapter HTML endpoint
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/epub/chapter?index=1"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("cyberspace grids")));
+
+        // 7. Verify Cover generation
+        mockMvc.perform(get("/api/documents/" + doc.getId() + "/cover"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, org.springframework.http.MediaType.IMAGE_JPEG_VALUE));
+    }
+
+    private void createSampleEpub(Path path, String title, String author, List<String> chapters) throws IOException {
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(path.toFile()), StandardCharsets.UTF_8)) {
+            zos.putNextEntry(new ZipEntry("mimetype"));
+            zos.write("application/epub+zip".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            zos.putNextEntry(new ZipEntry("META-INF/container.xml"));
+            zos.write("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles>
+                        <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+                      </rootfiles>
+                    </container>
+                    """.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            StringBuilder manifestItems = new StringBuilder();
+            StringBuilder spineItems = new StringBuilder();
+            StringBuilder ncxPoints = new StringBuilder();
+
+            manifestItems.append("<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n");
+
+            for (int i = 0; i < chapters.size(); i++) {
+                int idx = i + 1;
+                manifestItems.append("<item id=\"ch").append(idx).append("\" href=\"chap").append(idx).append(".xhtml\" media-type=\"application/xhtml+xml\"/>\n");
+                spineItems.append("<itemref idref=\"ch").append(idx).append("\"/>\n");
+                ncxPoints.append("<navPoint id=\"np-").append(idx).append("\" playOrder=\"").append(idx).append("\">\n")
+                        .append("<navLabel><text>Kapitel ").append(idx).append("</text></navLabel>\n")
+                        .append("<content src=\"chap").append(idx).append(".xhtml\"/>\n")
+                        .append("</navPoint>\n");
+            }
+
+            zos.putNextEntry(new ZipEntry("content.opf"));
+            String opf = """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId">
+                      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                        <dc:title>%s</dc:title>
+                        <dc:creator>%s</dc:creator>
+                        <dc:identifier id="BookId">urn:uuid:test-epub</dc:identifier>
+                      </metadata>
+                      <manifest>
+                        %s
+                      </manifest>
+                      <spine toc="ncx">
+                        %s
+                      </spine>
+                    </package>
+                    """.formatted(title, author, manifestItems, spineItems);
+            zos.write(opf.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            zos.putNextEntry(new ZipEntry("toc.ncx"));
+            String ncx = """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">
+                      <navMap>
+                        %s
+                      </navMap>
+                    </ncx>
+                    """.formatted(ncxPoints);
+            zos.write(ncx.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            for (int i = 0; i < chapters.size(); i++) {
+                int idx = i + 1;
+                zos.putNextEntry(new ZipEntry("chap" + idx + ".xhtml"));
+                String body = """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <html xmlns="http://www.w3.org/1999/xhtml">
+                        <head><title>Chapter %d</title></head>
+                        <body>
+                          <h1>Chapter %d</h1>
+                          <p>%s</p>
+                        </body>
+                        </html>
+                        """.formatted(idx, idx, chapters.get(i));
+                zos.write(body.getBytes(StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
+        }
     }
 
     private void createSamplePdf(Path target, List<String> pageContents) throws IOException {

@@ -70,7 +70,8 @@ public class DocumentDtoMapper {
                 doc.getAbstractText(),
                 doc.getMetadataSource(),
                 doc.getMetadataEnrichedAt(),
-                noteCount
+                noteCount,
+                doc.getFormat()
         );
     }
 

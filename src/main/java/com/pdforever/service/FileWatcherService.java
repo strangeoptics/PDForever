@@ -103,15 +103,15 @@ public class FileWatcherService {
                         } catch (IOException e) {
                             log.warn("Could not register new directory {}: {}", child, e.getMessage());
                         }
-                    } else if (scannerService.isPdfFile(child)) {
+                    } else if (scannerService.isSupportedDocument(child)) {
                         scheduleDebouncedIngestion(child);
                     }
                 } else if (kind == ENTRY_MODIFY) {
-                    if (scannerService.isPdfFile(child)) {
+                    if (scannerService.isSupportedDocument(child)) {
                         scheduleDebouncedIngestion(child);
                     }
                 } else if (kind == ENTRY_DELETE) {
-                    if (scannerService.isPdfFile(child)) {
+                    if (scannerService.isSupportedDocument(child)) {
                         cancelPendingTask(child);
                         scannerService.handleFileDeleted(child);
                     }

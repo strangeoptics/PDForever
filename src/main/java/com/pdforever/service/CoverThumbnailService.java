@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -23,15 +24,18 @@ public class CoverThumbnailService {
     private final StoragePathService storagePathService;
     private final DocumentRepository documentRepository;
     private final PdfExtractionService pdfExtractionService;
+    private final EpubExtractionService epubExtractionService;
 
     public CoverThumbnailService(
             StoragePathService storagePathService,
             DocumentRepository documentRepository,
-            PdfExtractionService pdfExtractionService
+            PdfExtractionService pdfExtractionService,
+            EpubExtractionService epubExtractionService
     ) {
         this.storagePathService = storagePathService;
         this.documentRepository = documentRepository;
         this.pdfExtractionService = pdfExtractionService;
+        this.epubExtractionService = epubExtractionService;
     }
 
     public Path getCoversPath() {
@@ -73,7 +77,12 @@ public class CoverThumbnailService {
         } catch (IOException ignored) {
         }
 
-        boolean rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
+        boolean rendered;
+        if (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub")) {
+            rendered = epubExtractionService.renderCoverImage(pdfPath, coverPath);
+        } else {
+            rendered = pdfExtractionService.renderCoverImage(pdfPath, coverPath);
+        }
         if (!rendered || !Files.exists(coverPath)) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not render cover image for document: " + id);
         }

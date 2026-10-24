@@ -9,6 +9,7 @@ import com.pdforever.dto.TreeNodeDto;
 import com.pdforever.dto.UpdateMetadataRequest;
 import com.pdforever.dto.UpdateReadingProgressRequest;
 import com.pdforever.service.DirectoryScannerService;
+import com.pdforever.service.EpubExtractionService;
 import com.pdforever.service.LibraryManagementService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -172,23 +173,56 @@ public class DocumentController {
         return Map.of("deleted", deleted);
     }
 
+    @GetMapping("/documents/{id}/epub/chapters")
+    public List<EpubExtractionService.ChapterInfo> getEpubChapters(@PathVariable UUID id) {
+        return libraryService.getEpubChapters(id);
+    }
+
+    @GetMapping(value = "/documents/{id}/epub/chapter", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> getEpubChapterHtml(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "1") int index
+    ) throws IOException {
+        String html = libraryService.getEpubChapterHtml(id, index);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/html; charset=UTF-8"))
+                .body(html);
+    }
+
+    @GetMapping("/documents/{id}/epub/resource")
+    public ResponseEntity<byte[]> getEpubResource(
+            @PathVariable UUID id,
+            @RequestParam String path
+    ) throws IOException {
+        byte[] bytes = libraryService.getEpubResource(id, path);
+        String mimeType = libraryService.getEpubResourceMimeType(path);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(mimeType))
+                .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS))
+                .body(bytes);
+    }
+
     /**
-     * Streams a PDF file with full HTTP Byte-Range (206 Partial Content) support via Spring's ResourceRegion.
+     * Streams a document file (PDF or EPUB) with full HTTP Byte-Range (206 Partial Content) support via Spring's ResourceRegion.
      */
     @GetMapping("/documents/{id}/stream")
     public ResponseEntity<ResourceRegion> streamDocument(
             @PathVariable UUID id,
             @RequestHeader HttpHeaders headers
     ) throws IOException {
-        Path pdfPath = libraryService.getDocumentFilePath(id);
-        Resource resource = new FileSystemResource(pdfPath);
+        Path filePath = libraryService.getDocumentFilePath(id);
+        Resource resource = new FileSystemResource(filePath);
         long contentLength = resource.contentLength();
+
+        MediaType contentType = filePath.getFileName().toString().toLowerCase().endsWith(".epub")
+                ? MediaType.parseMediaType("application/epub+zip")
+                : MediaType.APPLICATION_PDF;
 
         List<HttpRange> ranges = headers.getRange();
         if (ranges.isEmpty()) {
             ResourceRegion fullRegion = new ResourceRegion(resource, 0, contentLength);
             return ResponseEntity.status(HttpStatus.OK)
-                    .contentType(MediaType.APPLICATION_PDF)
+                    .contentType(contentType)
                     .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                     .body(fullRegion);
         }
@@ -200,7 +234,7 @@ public class DocumentController {
 
         ResourceRegion region = new ResourceRegion(resource, start, rangeLength);
         return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
-                .contentType(MediaType.APPLICATION_PDF)
+                .contentType(contentType)
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                 .body(region);
     }

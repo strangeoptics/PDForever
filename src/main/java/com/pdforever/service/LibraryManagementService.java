@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -37,6 +38,7 @@ public class LibraryManagementService {
     private final CoverThumbnailService coverThumbnailService;
     private final DocumentReadingProgressService readingProgressService;
     private final PdfExtractionService pdfExtractionService;
+    private final EpubExtractionService epubExtractionService;
     private final MetadataEnrichmentService metadataEnrichmentService;
     private final DocumentDtoMapper mapper;
     private final StoragePathService storagePathService;
@@ -52,6 +54,7 @@ public class LibraryManagementService {
             CoverThumbnailService coverThumbnailService,
             DocumentReadingProgressService readingProgressService,
             PdfExtractionService pdfExtractionService,
+            EpubExtractionService epubExtractionService,
             MetadataEnrichmentService metadataEnrichmentService,
             DocumentDtoMapper mapper,
             StoragePathService storagePathService,
@@ -65,6 +68,7 @@ public class LibraryManagementService {
         this.coverThumbnailService = coverThumbnailService;
         this.readingProgressService = readingProgressService;
         this.pdfExtractionService = pdfExtractionService;
+        this.epubExtractionService = epubExtractionService;
         this.metadataEnrichmentService = metadataEnrichmentService;
         this.mapper = mapper;
         this.storagePathService = storagePathService;
@@ -228,8 +232,37 @@ public class LibraryManagementService {
 
     @Transactional(readOnly = true)
     public List<TocItemDto> getDocumentOutline(UUID id) {
-        Path pdfPath = getDocumentFilePath(id);
-        return pdfExtractionService.extractOutline(pdfPath);
+        Document doc = findActiveDocumentOrThrow(id);
+        Path filePath = getDocumentFilePath(id);
+        if (doc.getFileName() != null && doc.getFileName().toLowerCase(Locale.ROOT).endsWith(".epub")) {
+            return epubExtractionService.extractOutline(filePath);
+        }
+        return pdfExtractionService.extractOutline(filePath);
+    }
+
+    @Transactional(readOnly = true)
+    public List<EpubExtractionService.ChapterInfo> getEpubChapters(UUID id) {
+        Document doc = findActiveDocumentOrThrow(id);
+        Path epubPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        return epubExtractionService.getChapters(epubPath);
+    }
+
+    @Transactional(readOnly = true)
+    public String getEpubChapterHtml(UUID id, int chapterIndex) throws IOException {
+        Document doc = findActiveDocumentOrThrow(id);
+        Path epubPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        return epubExtractionService.getChapterHtml(epubPath, chapterIndex, id);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getEpubResource(UUID id, String resourcePath) throws IOException {
+        Document doc = findActiveDocumentOrThrow(id);
+        Path epubPath = storagePathService.resolveDocumentPath(doc.getRelativePath());
+        return epubExtractionService.getResourceBytes(epubPath, resourcePath);
+    }
+
+    public String getEpubResourceMimeType(String resourcePath) {
+        return epubExtractionService.guessMimeType(resourcePath);
     }
 
     // --- Cover Thumbnail Operations ---

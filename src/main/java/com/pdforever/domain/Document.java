@@ -81,6 +81,9 @@ public class Document {
     @Column(name = "metadata_enriched_at")
     private Instant metadataEnrichedAt;
 
+    @Column(name = "format", length = 16)
+    private String format = "PDF";
+
     @ManyToMany(fetch = FetchType.LAZY)
     @BatchSize(size = 50)
     @JoinTable(
@@ -250,6 +253,20 @@ public class Document {
 
     public void setMetadataEnrichedAt(Instant metadataEnrichedAt) {
         this.metadataEnrichedAt = metadataEnrichedAt;
+    }
+
+    public String getFormat() {
+        if (format == null) {
+            if (fileName != null && fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".epub")) {
+                return "EPUB";
+            }
+            return "PDF";
+        }
+        return format;
+    }
+
+    public void setFormat(String format) {
+        this.format = format;
     }
 
     public Set<Tag> getTags() {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FileText, Loader2 } from 'lucide-react';
-import { DocumentItem } from '../types';
+import { BookOpen, FileText, Loader2 } from 'lucide-react';
+import { DocumentItem, isEpubDocument } from '../types';
 import { api } from '../api';
 
 const fallbackCoverCache = new Map<string, string>();
@@ -42,6 +42,10 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
   // Client-side PDF.js fallback ONLY if backend cover endpoint fails or is unavailable
   useEffect(() => {
     if (!isVisible || !backendFailed || fallbackDataUrl || fallbackFailed) return;
+    if (isEpubDocument(doc)) {
+      setFallbackFailed(true);
+      return;
+    }
 
     const cached = fallbackCoverCache.get(doc.id);
     if (cached) {
@@ -154,7 +158,11 @@ export const DocumentCover: React.FC<DocumentCoverProps> = ({ document: doc, cla
       {/* 3. Generic fallback icon if both backend & client rendering failed */}
       {(!isVisible || fallbackFailed || (backendFailed && !fallbackDataUrl && !imageLoaded)) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-1 p-2 text-center">
-          <FileText className="w-8 h-8 stroke-1" />
+          {isEpubDocument(doc) ? (
+            <BookOpen className="w-8 h-8 stroke-1 text-purple-400" />
+          ) : (
+            <FileText className="w-8 h-8 stroke-1" />
+          )}
           <span className="text-[10px] font-mono line-clamp-1">{doc.fileName}</span>
         </div>
       )}

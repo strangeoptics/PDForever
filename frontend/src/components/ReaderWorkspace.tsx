@@ -1,5 +1,6 @@
 import React from 'react';
 import { PdfViewer } from './PdfViewer';
+import { EpubViewer } from './EpubViewer';
 import { RightInspector } from './RightInspector';
 import {
   AppSettings,
@@ -9,6 +10,7 @@ import {
   Tag,
   UpdateMetadataPayload,
   UpdateReadingProgressPayload,
+  isEpubDocument,
 } from '../types';
 
 interface ReaderWorkspaceProps {
@@ -83,45 +85,81 @@ export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = React.memo(({
     <>
       {/* Reader Area: Single or Side-by-Side Split-View */}
       <div className="flex-1 flex min-w-0 h-full divide-x divide-slate-200 dark:divide-slate-800">
-        {/* Primary PDF Viewer */}
+        {/* Primary Viewer (PDF or EPUB) */}
         <div className="flex-1 min-w-0 h-full">
-          <PdfViewer
-            document={activeDoc}
-            notes={docNotes}
-            targetJump={targetJump}
-            inspectorOpen={inspectorOpen}
-            defaultViewMode={settings.defaultViewMode}
-            isSplitView={splitViewOpen}
-            isSecondaryPane={false}
-            onToggleInspector={onToggleInspector}
-            onToggleSplitView={onToggleSplitView}
-            onUpdateProgress={onUpdateReadingProgress}
-            onPageChange={onPageChange}
-            onRequestCreateNote={onRequestCreateNote}
-            onSelectNote={onSelectPrimaryNote}
-            isFullscreen={isFullscreen}
-            onToggleFullscreen={onToggleFullscreen}
-          />
-        </div>
-
-        {/* Secondary PDF Viewer (Split-View Mode) */}
-        {splitViewOpen && secondaryDoc && (
-          <div className="flex-1 min-w-0 h-full">
+          {isEpubDocument(activeDoc) ? (
+            <EpubViewer
+              document={activeDoc}
+              notes={docNotes}
+              targetJump={targetJump}
+              inspectorOpen={inspectorOpen}
+              isSplitView={splitViewOpen}
+              isSecondaryPane={false}
+              onToggleInspector={onToggleInspector}
+              onToggleSplitView={onToggleSplitView}
+              onUpdateProgress={onUpdateReadingProgress}
+              onPageChange={onPageChange}
+              onRequestCreateNote={onRequestCreateNote}
+              onSelectNote={onSelectPrimaryNote}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={onToggleFullscreen}
+            />
+          ) : (
             <PdfViewer
-              document={secondaryDoc}
-              notes={secondaryDocNotes}
-              targetJump={secondaryTargetJump}
+              document={activeDoc}
+              notes={docNotes}
+              targetJump={targetJump}
               inspectorOpen={inspectorOpen}
               defaultViewMode={settings.defaultViewMode}
-              isSplitView={true}
-              isSecondaryPane={true}
-              availableDocuments={availableDocuments}
-              onCloseSecondaryPane={onCloseSecondaryPane}
-              onChangeSecondaryDocument={onChangeSecondaryDocument}
+              isSplitView={splitViewOpen}
+              isSecondaryPane={false}
+              onToggleInspector={onToggleInspector}
+              onToggleSplitView={onToggleSplitView}
               onUpdateProgress={onUpdateReadingProgress}
+              onPageChange={onPageChange}
               onRequestCreateNote={onRequestCreateNote}
-              onSelectNote={onSelectSecondaryNote}
+              onSelectNote={onSelectPrimaryNote}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={onToggleFullscreen}
             />
+          )}
+        </div>
+
+        {/* Secondary Viewer (Split-View Mode) */}
+        {splitViewOpen && secondaryDoc && (
+          <div className="flex-1 min-w-0 h-full">
+            {isEpubDocument(secondaryDoc) ? (
+              <EpubViewer
+                document={secondaryDoc}
+                notes={secondaryDocNotes}
+                targetJump={secondaryTargetJump}
+                inspectorOpen={inspectorOpen}
+                isSplitView={true}
+                isSecondaryPane={true}
+                availableDocuments={availableDocuments}
+                onCloseSecondaryPane={onCloseSecondaryPane}
+                onChangeSecondaryDocument={onChangeSecondaryDocument}
+                onUpdateProgress={onUpdateReadingProgress}
+                onRequestCreateNote={onRequestCreateNote}
+                onSelectNote={onSelectSecondaryNote}
+              />
+            ) : (
+              <PdfViewer
+                document={secondaryDoc}
+                notes={secondaryDocNotes}
+                targetJump={secondaryTargetJump}
+                inspectorOpen={inspectorOpen}
+                defaultViewMode={settings.defaultViewMode}
+                isSplitView={true}
+                isSecondaryPane={true}
+                availableDocuments={availableDocuments}
+                onCloseSecondaryPane={onCloseSecondaryPane}
+                onChangeSecondaryDocument={onChangeSecondaryDocument}
+                onUpdateProgress={onUpdateReadingProgress}
+                onRequestCreateNote={onRequestCreateNote}
+                onSelectNote={onSelectSecondaryNote}
+              />
+            )}
           </div>
         )}
       </div>
