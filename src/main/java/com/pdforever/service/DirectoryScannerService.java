@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 public class DirectoryScannerService {
 
     private static final Logger log = LoggerFactory.getLogger(DirectoryScannerService.class);
+    private static final int BATCH_COMMIT_INTERVAL = 50;
 
     private final LibraryProperties properties;
     private final DocumentRepository documentRepository;
@@ -94,29 +95,56 @@ public class DirectoryScannerService {
         int added = 0;
         int updated = 0;
         int deleted = 0;
+        int uncommittedCount = 0;
 
-        for (Map.Entry<String, Path> entry : discoveredPdfs.entrySet()) {
-            IngestionOutcome outcome = ingestOrUpdateFile(entry.getValue());
-            if (outcome == IngestionOutcome.ADDED) added++;
-            else if (outcome == IngestionOutcome.UPDATED) updated++;
-        }
+        try {
+            for (Map.Entry<String, Path> entry : discoveredPdfs.entrySet()) {
+                IngestionOutcome outcome = ingestOrUpdateFile(entry.getValue(), false);
+                if (outcome == IngestionOutcome.ADDED) {
+                    added++;
+                    uncommittedCount++;
+                } else if (outcome == IngestionOutcome.UPDATED) {
+                    updated++;
+                    uncommittedCount++;
+                }
+                if (uncommittedCount >= BATCH_COMMIT_INTERVAL) {
+                    luceneIndexService.commit();
+                    uncommittedCount = 0;
+                }
+            }
 
-        List<Document> allDbDocs = documentRepository.findAll();
-        for (Document doc : allDbDocs) {
-            if (!doc.isDeleted() && !discoveredPdfs.containsKey(doc.getRelativePath())) {
-                markDocumentDeleted(doc);
-                deleted++;
-            } else if (!doc.isDeleted() && doc.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(doc.getMetaTitle())) {
-                doc.setMetaTitle(null);
-                if ("PDF_INFO".equals(doc.getMetadataSource())) {
-                    doc.setMetadataSource(null);
+            List<Document> allDbDocs = documentRepository.findAll();
+            for (Document doc : allDbDocs) {
+                if (!doc.isDeleted() && !discoveredPdfs.containsKey(doc.getRelativePath())) {
+                    markDocumentDeleted(doc, false);
+                    deleted++;
+                    uncommittedCount++;
+                    if (uncommittedCount >= BATCH_COMMIT_INTERVAL) {
+                        luceneIndexService.commit();
+                        uncommittedCount = 0;
+                    }
+                } else if (!doc.isDeleted() && doc.getMetaTitle() != null && fileNameCleaner.isJunkOrAdTitle(doc.getMetaTitle())) {
+                    doc.setMetaTitle(null);
+                    if ("PDF_INFO".equals(doc.getMetadataSource())) {
+                        doc.setMetadataSource(null);
+                    }
+                    if (doc.getPublicationYear() == null) {
+                        metadataEnrichmentService.extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
+                                .ifPresent(doc::setPublicationYear);
+                    }
+                    documentRepository.save(doc);
+                    log.info("Purged junk metaTitle from active document {}: relativePath={}", doc.getId(), doc.getRelativePath());
                 }
-                if (doc.getPublicationYear() == null) {
-                    metadataEnrichmentService.extractYearFromPathOrFileName(doc.getRelativePath(), doc.getFileName())
-                            .ifPresent(doc::setPublicationYear);
+            }
+        } catch (IOException e) {
+            log.error("Failed during batched Lucene commit in library reconciliation: {}", e.getMessage(), e);
+        } finally {
+            try {
+                if (luceneIndexService.hasUncommittedChanges()) {
+                    luceneIndexService.commit();
                 }
-                documentRepository.save(doc);
-                log.info("Purged junk metaTitle from active document {}: relativePath={}", doc.getId(), doc.getRelativePath());
+            } catch (IOException e) {
+                log.error("Failed final Lucene commit in library reconciliation: {}", e.getMessage(), e);
             }
         }
 
@@ -133,6 +161,10 @@ public class DirectoryScannerService {
     }
 
     public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath) {
+        return ingestOrUpdateFile(filePath, true);
+    }
+
+    public synchronized IngestionOutcome ingestOrUpdateFile(Path filePath, boolean commitImmediately) {
         if (!Files.exists(filePath) || !Files.isRegularFile(filePath) || !isPdfFile(filePath)) {
             return IngestionOutcome.SKIPPED_ERROR;
         }
@@ -191,8 +223,8 @@ public class DirectoryScannerService {
                 Document saved = documentRepository.save(existing);
 
                 deleteCachedCover(saved.getId());
-                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts());
-                log.info("Re-indexed modified PDF: {} ({} pages)", relPath, extracted.pageCount());
+                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
+                log.info("Re-indexed modified PDF: {} ({} pages, commitImmediately={})", relPath, extracted.pageCount(), commitImmediately);
                 return IngestionOutcome.UPDATED;
             } else {
                 PdfExtractionService.ExtractedPdfData extracted = pdfExtractionService.extractPdfPages(filePath);
@@ -212,8 +244,8 @@ public class DirectoryScannerService {
                 metadataEnrichmentService.enrichDocument(newDoc, filePath, extracted.pageTexts(), false);
 
                 Document saved = documentRepository.save(newDoc);
-                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts());
-                log.info("Indexed new PDF: {} ({} pages)", relPath, extracted.pageCount());
+                luceneIndexService.indexDocumentPages(saved, extracted.pageTexts(), commitImmediately);
+                log.info("Indexed new PDF: {} ({} pages, commitImmediately={})", relPath, extracted.pageCount(), commitImmediately);
                 return IngestionOutcome.ADDED;
             }
         } catch (IOException e) {
@@ -227,18 +259,23 @@ public class DirectoryScannerService {
         String relPath = toRelativePath(filePath);
         documentRepository.findByRelativePath(relPath).ifPresent(doc -> {
             if (!doc.isDeleted()) {
-                markDocumentDeleted(doc);
+                markDocumentDeleted(doc, true);
             }
         });
     }
 
     private void markDocumentDeleted(Document doc) {
+        markDocumentDeleted(doc, true);
+    }
+
+    private void markDocumentDeleted(Document doc, boolean commitImmediately) {
         doc.setDeleted(true);
         documentRepository.save(doc);
         deleteCachedCover(doc.getId());
         try {
-            luceneIndexService.deleteDocument(doc.getId());
-            log.info("Marked document as deleted and purged from Lucene: {}", doc.getRelativePath());
+            luceneIndexService.deleteDocument(doc.getId(), commitImmediately);
+            log.info("Marked document as deleted and purged from Lucene: {} (commitImmediately={})",
+                    doc.getRelativePath(), commitImmediately);
         } catch (IOException e) {
             log.error("Failed to purge document {} from Lucene: {}", doc.getId(), e.getMessage());
         }

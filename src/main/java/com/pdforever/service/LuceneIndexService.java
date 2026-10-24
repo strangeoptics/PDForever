@@ -74,9 +74,19 @@ public class LuceneIndexService {
     }
 
     /**
-     * Indexes each page of the given PDF Document as a distinct Lucene document.
+     * Indexes each page of the given PDF Document as a distinct Lucene document,
+     * immediately committing changes to disk and refreshing the SearcherManager.
      */
     public synchronized void indexDocumentPages(Document doc, List<String> pageTexts) throws IOException {
+        indexDocumentPages(doc, pageTexts, true);
+    }
+
+    /**
+     * Indexes each page of the given PDF Document as a distinct Lucene document.
+     * When {@code commitImmediately} is false (batch mode), the commit and searcher refresh
+     * are deferred until {@link #commit()} is explicitly called.
+     */
+    public synchronized void indexDocumentPages(Document doc, List<String> pageTexts, boolean commitImmediately) throws IOException {
         String docIdStr = doc.getId().toString();
         indexWriter.deleteDocuments(new Term(FIELD_DOC_ID, docIdStr));
 
@@ -99,19 +109,52 @@ public class LuceneIndexService {
             indexWriter.addDocument(luceneDoc);
         }
 
-        indexWriter.commit();
-        searcherManager.maybeRefreshBlocking();
-        log.debug("Indexed {} pages for document {} ({})", pageTexts.size(), doc.getFileName(), docIdStr);
+        if (commitImmediately) {
+            commit();
+        }
+        log.debug("Indexed {} pages for document {} ({}, commitImmediately={})",
+                pageTexts.size(), doc.getFileName(), docIdStr, commitImmediately);
+    }
+
+    /**
+     * Purges all page documents belonging to the given PDF UUID from the Lucene index,
+     * immediately committing changes to disk and refreshing the SearcherManager.
+     */
+    public synchronized void deleteDocument(UUID docId) throws IOException {
+        deleteDocument(docId, true);
     }
 
     /**
      * Purges all page documents belonging to the given PDF UUID from the Lucene index.
+     * When {@code commitImmediately} is false (batch mode), the commit and searcher refresh
+     * are deferred until {@link #commit()} is explicitly called.
      */
-    public synchronized void deleteDocument(UUID docId) throws IOException {
+    public synchronized void deleteDocument(UUID docId, boolean commitImmediately) throws IOException {
         indexWriter.deleteDocuments(new Term(FIELD_DOC_ID, docId.toString()));
-        indexWriter.commit();
-        searcherManager.maybeRefreshBlocking();
-        log.info("Purged document {} from Lucene index", docId);
+        if (commitImmediately) {
+            commit();
+        }
+        log.info("Purged document {} from Lucene index (commitImmediately={})", docId, commitImmediately);
+    }
+
+    /**
+     * Checks whether the underlying IndexWriter has any uncommitted changes.
+     */
+    public synchronized boolean hasUncommittedChanges() {
+        return indexWriter != null && indexWriter.hasUncommittedChanges();
+    }
+
+    /**
+     * Commits pending changes from all indexed or purged documents to disk and refreshes SearcherManager.
+     */
+    public synchronized void commit() throws IOException {
+        if (indexWriter != null && indexWriter.hasUncommittedChanges()) {
+            indexWriter.commit();
+            searcherManager.maybeRefreshBlocking();
+            log.debug("Committed Lucene changes and refreshed SearcherManager");
+        } else if (searcherManager != null) {
+            searcherManager.maybeRefresh();
+        }
     }
 
     public SearcherManager getSearcherManager() {
@@ -125,6 +168,9 @@ public class LuceneIndexService {
     @PreDestroy
     public synchronized void close() {
         try {
+            if (hasUncommittedChanges()) {
+                indexWriter.commit();
+            }
             searcherManager.close();
             indexWriter.close();
             directory.close();
