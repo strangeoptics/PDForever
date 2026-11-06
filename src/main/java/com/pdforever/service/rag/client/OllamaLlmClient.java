@@ -30,12 +30,24 @@ public class OllamaLlmClient implements LlmClient {
     public static final String DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
     public static final String DEFAULT_VLM_MODEL = "qwen2.5vl";
 
+    public static final String VLM_AD_PROMPT_BASE =
+            "Prüfe, ob diese vollständige Zeitschriftenseite ausschließlich eine ganzseitige Werbeanzeige ist. " +
+            "Als Werbung (is_ad = true) gelten nur ganzseitige kommerzielle Produkt-, Marken-, Image- oder Abo-Anzeigen " +
+            "(oft mit Slogan, Preis/Aktion, Coupon, QR-Code/URL oder Kennzeichnung wie Anzeige, Werbung, Advertorial, Sponsored). " +
+            "KEINE Werbung (is_ad = false) sind: das Magazin-Cover/Titelseite (mit Magazin-Titel, Ausgabenummer, Heftpreis, Barcode, Titelthemen), " +
+            "Inhaltsverzeichnis, Editorial, Impressum, Leserbriefe, Vorschau, redaktionelle Artikel, Reportagen, Interviews, " +
+            "ganzseitige Foto-Aufmacher/Kapiteltrenner, redaktionelle Produkttests/Kaufberatungen/Vergleichstabellen/Rezensionen " +
+            "(mit Fazit, Pro/Contra, Wertungskasten) sowie Seiten, die neben einer kleineren Anzeige auch redaktionellen Text enthalten. " +
+            "Entscheide konservativ: Bei Zweifeln setze is_ad auf false. ";
+
     public static final String VLM_AD_PROMPT =
-            "Prüfe, ob diese vollständige Zeitschriftenseite eine ganzseitige Werbung " +
-            "ist. Produktanzeigen und Markenwerbung gelten als Werbung; redaktionelle " +
-            "Artikel und Inhaltsseiten nicht. Entscheide konservativ: Bei Zweifeln " +
-            "setze is_ad auf false. Antworte gemäß dem JSON-Schema (confidence zwischen 0 und 1) " +
-            "und formuliere reason kurz auf Deutsch.";
+            VLM_AD_PROMPT_BASE +
+            "Antworte gemäß dem JSON-Schema mit is_ad (boolean), confidence (Dezimalzahl zwischen 0.0 und 1.0) " +
+            "und reason (maximal ein kurzer Satz auf Deutsch).";
+
+    public static final String VLM_AD_PROMPT_NO_REASON =
+            VLM_AD_PROMPT_BASE +
+            "Antworte gemäß dem JSON-Schema mit is_ad (boolean) und confidence (Dezimalzahl zwischen 0.0 und 1.0).";
 
     public static final Map<String, Object> VLM_AD_JSON_SCHEMA = Map.of(
             "type", "object",
@@ -48,7 +60,18 @@ public class OllamaLlmClient implements LlmClient {
             "additionalProperties", false
     );
 
+    public static final Map<String, Object> VLM_AD_JSON_SCHEMA_NO_REASON = Map.of(
+            "type", "object",
+            "properties", Map.of(
+                    "is_ad", Map.of("type", "boolean"),
+                    "confidence", Map.of("type", "number")
+            ),
+            "required", List.of("is_ad", "confidence"),
+            "additionalProperties", false
+    );
+
     private static final Set<String> ALLOWED_VLM_FIELDS = Set.of("is_ad", "confidence", "reason");
+    private static final Set<String> ALLOWED_VLM_FIELDS_NO_REASON = Set.of("is_ad", "confidence");
 
     private final ObjectMapper objectMapper;
     private final ObjectMapper strictObjectMapper;
@@ -228,6 +251,10 @@ public class OllamaLlmClient implements LlmClient {
      * The model name is passed verbatim without rewriting.
      */
     public VlmCallResult classifyPageImageWithVlm(String baseUrl, String model, byte[] pngBytes) {
+        return classifyPageImageWithVlm(baseUrl, model, pngBytes, true);
+    }
+
+    public VlmCallResult classifyPageImageWithVlm(String baseUrl, String model, byte[] pngBytes, boolean includeReason) {
         if (pngBytes == null || pngBytes.length == 0) {
             return VlmCallResult.failure("Leere Bilddaten beim Rendern der PDF-Seite.");
         }
@@ -237,23 +264,28 @@ public class OllamaLlmClient implements LlmClient {
 
         String url = sanitizeUrl(baseUrl);
         String base64Image = Base64.getEncoder().encodeToString(pngBytes);
+        String promptToUse = includeReason ? VLM_AD_PROMPT : VLM_AD_PROMPT_NO_REASON;
+        Map<String, Object> schemaToUse = includeReason ? VLM_AD_JSON_SCHEMA : VLM_AD_JSON_SCHEMA_NO_REASON;
 
         try {
+            Map<String, Object> vlmOptions = Map.of(
+                    "temperature", 0,
+                    "seed", 0,
+                    "num_ctx", 8192
+            );
+
             Map<String, Object> chatPayload = new LinkedHashMap<>();
             chatPayload.put("model", model);
             chatPayload.put("messages", List.of(
                     Map.of(
                             "role", "user",
-                            "content", VLM_AD_PROMPT,
+                            "content", promptToUse,
                             "images", List.of(base64Image)
                     )
             ));
             chatPayload.put("stream", false);
-            chatPayload.put("format", VLM_AD_JSON_SCHEMA);
-            chatPayload.put("options", Map.of(
-                    "temperature", 0,
-                    "seed", 0
-            ));
+            chatPayload.put("format", schemaToUse);
+            chatPayload.put("options", vlmOptions);
 
             HttpRequest chatReq = HttpRequest.newBuilder(URI.create(url + "/api/chat"))
                     .header("Content-Type", "application/json")
@@ -263,17 +295,16 @@ public class OllamaLlmClient implements LlmClient {
 
             HttpResponse<String> res = httpClient.send(chatReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
-            if (res.statusCode() == 404) {
+            String rawContent = extractRawVlmContent(res);
+
+            if (res.statusCode() == 404 || (res.statusCode() == 200 && (rawContent == null || rawContent.isBlank()))) {
                 Map<String, Object> genPayload = new LinkedHashMap<>();
                 genPayload.put("model", model);
-                genPayload.put("prompt", VLM_AD_PROMPT);
+                genPayload.put("prompt", promptToUse);
                 genPayload.put("images", List.of(base64Image));
                 genPayload.put("stream", false);
-                genPayload.put("format", VLM_AD_JSON_SCHEMA);
-                genPayload.put("options", Map.of(
-                        "temperature", 0,
-                        "seed", 0
-                ));
+                genPayload.put("format", schemaToUse);
+                genPayload.put("options", vlmOptions);
 
                 HttpRequest genReq = HttpRequest.newBuilder(URI.create(url + "/api/generate"))
                         .header("Content-Type", "application/json")
@@ -282,6 +313,7 @@ public class OllamaLlmClient implements LlmClient {
                         .build();
 
                 res = httpClient.send(genReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                rawContent = extractRawVlmContent(res);
             }
 
             if (res.statusCode() != 200 || res.body() == null) {
@@ -293,18 +325,11 @@ public class OllamaLlmClient implements LlmClient {
                 return VlmCallResult.failure("Ollama Fehler: " + root.get("error").asText());
             }
 
-            String rawContent = null;
-            if (root.has("message") && root.get("message").isObject() && root.get("message").has("content")) {
-                rawContent = root.get("message").get("content").asText(null);
-            } else if (root.has("response")) {
-                rawContent = root.get("response").asText(null);
-            }
-
             if (rawContent == null) {
                 return VlmCallResult.failure("Ollama-Antwort enthält kein 'message.content' oder 'response'-Feld.");
             }
 
-            VlmAdDecision decision = validateAndParseVlmJson(rawContent);
+            VlmAdDecision decision = validateAndParseVlmJson(rawContent, includeReason);
             return VlmCallResult.success(decision);
         } catch (IllegalArgumentException validationEx) {
             return VlmCallResult.failure("Ungültige VLM-Antwort: " + validationEx.getMessage());
@@ -317,6 +342,23 @@ public class OllamaLlmClient implements LlmClient {
         }
     }
 
+    private String extractRawVlmContent(HttpResponse<String> res) {
+        if (res == null || res.statusCode() != 200 || res.body() == null) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(res.body());
+            if (root.has("message") && root.get("message").isObject() && root.get("message").has("content")) {
+                return root.get("message").get("content").asText(null);
+            }
+            if (root.has("response")) {
+                return root.get("response").asText(null);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     /**
      * Strictly validates the VLM JSON output against the required schema:
      * {
@@ -327,6 +369,10 @@ public class OllamaLlmClient implements LlmClient {
      * Rejects unexpected fields, missing fields, duplicate keys, trailing tokens, and wrong types.
      */
     public VlmAdDecision validateAndParseVlmJson(String rawJson) {
+        return validateAndParseVlmJson(rawJson, true);
+    }
+
+    public VlmAdDecision validateAndParseVlmJson(String rawJson, boolean includeReason) {
         if (rawJson == null || rawJson.isBlank()) {
             throw new IllegalArgumentException("Antwort ist leer.");
         }
@@ -347,18 +393,23 @@ public class OllamaLlmClient implements LlmClient {
             throw new IllegalArgumentException("JSON-Wurzel muss ein Objekt sein.");
         }
 
+        Set<String> allowedFields = includeReason ? ALLOWED_VLM_FIELDS : ALLOWED_VLM_FIELDS_NO_REASON;
         Set<String> presentFields = new HashSet<>();
         Iterator<String> fieldNames = node.fieldNames();
         while (fieldNames.hasNext()) {
             String field = fieldNames.next();
-            if (!ALLOWED_VLM_FIELDS.contains(field)) {
+            if (!allowedFields.contains(field)) {
                 throw new IllegalArgumentException("Unerwartetes Feld '" + field + "' in VLM-Antwort.");
             }
             presentFields.add(field);
         }
 
-        if (!presentFields.containsAll(ALLOWED_VLM_FIELDS) || presentFields.size() != ALLOWED_VLM_FIELDS.size()) {
-            throw new IllegalArgumentException("Pflichtfelder fehlen (erwartet: is_ad, confidence, reason).");
+        if (!presentFields.containsAll(allowedFields) || presentFields.size() != allowedFields.size()) {
+            throw new IllegalArgumentException(
+                    includeReason
+                            ? "Pflichtfelder fehlen (erwartet: is_ad, confidence, reason)."
+                            : "Pflichtfelder fehlen (erwartet: is_ad, confidence)."
+            );
         }
 
         JsonNode isAdNode = node.get("is_ad");
@@ -380,6 +431,10 @@ public class OllamaLlmClient implements LlmClient {
                 || confidence < 0.0
                 || confidence > 1.0) {
             throw new IllegalArgumentException("'confidence' muss eine endliche Zahl zwischen 0 und 1 sein (erhalten: " + rawNumberText + ").");
+        }
+
+        if (!includeReason) {
+            return new VlmAdDecision(isAd, confidence, "");
         }
 
         JsonNode reasonNode = node.get("reason");

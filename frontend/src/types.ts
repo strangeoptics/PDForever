@@ -209,6 +209,7 @@ export interface AppSettings {
   adMinConfidence?: number;
   adRenderDpi?: number;
   adDryRun?: boolean;
+  adIncludeReason?: boolean;
 }
 
 export interface AdRemovalRequestPayload {
@@ -218,6 +219,7 @@ export interface AdRemovalRequestPayload {
   dpi?: number;
   dryRun?: boolean;
   outputFileName?: string;
+  includeReason?: boolean;
 }
 
 export interface ApplyAdRemovalPayload {

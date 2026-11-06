@@ -74,8 +74,19 @@ public class MagazineAdRemovalService {
             double minConfidence,
             int dpi,
             boolean dryRun,
-            String outputFileName
+            String outputFileName,
+            boolean includeReason
     ) {
+        public ResolvedAdRemovalSettings(
+                String ollamaUrl,
+                String model,
+                double minConfidence,
+                int dpi,
+                boolean dryRun,
+                String outputFileName
+        ) {
+            this(ollamaUrl, model, minConfidence, dpi, dryRun, outputFileName, true);
+        }
     }
 
     public record PageProtectionEvaluation(
@@ -167,7 +178,9 @@ public class MagazineAdRemovalService {
                 ? request.outputFileName().strip()
                 : null;
 
-        return new ResolvedAdRemovalSettings(ollamaUrl, model, minConfidence, dpi, dryRun, outputFileName);
+        boolean includeReason = (request == null || request.includeReason() == null) || request.includeReason();
+
+        return new ResolvedAdRemovalSettings(ollamaUrl, model, minConfidence, dpi, dryRun, outputFileName, includeReason);
     }
 
     /**
@@ -329,7 +342,8 @@ public class MagazineAdRemovalService {
                     OllamaLlmClient.VlmCallResult vlmResult = ollamaLlmClient.classifyPageImageWithVlm(
                             settings.ollamaUrl(),
                             settings.model(),
-                            pngBytes
+                            pngBytes,
+                            settings.includeReason()
                     );
 
                     if (vlmResult.isSuccess()) {
