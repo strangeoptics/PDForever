@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   coverLayout: 'left',
   defaultViewMode: 'continuous',
   defaultInspectorOpen: true,
+  ragMaxPassages: 12,
 };
 
 function loadInitialSettings(): AppSettings {

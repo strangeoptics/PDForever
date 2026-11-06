@@ -36,7 +36,7 @@ public record LibraryProperties(
                 model = "qwen2.5:14b";
             }
             if (maxPassages <= 0) {
-                maxPassages = 6;
+                maxPassages = 12;
             }
             if (provider == null || provider.isBlank()) {
                 provider = "ollama";
@@ -58,7 +58,7 @@ public record LibraryProperties(
             debounceMs = 2000L;
         }
         if (rag == null) {
-            rag = new RagProperties(true, "http://localhost:11434", "qwen2.5:14b", 6);
+            rag = new RagProperties(true, "http://localhost:11434", "qwen2.5:14b", 12);
         }
     }
 }

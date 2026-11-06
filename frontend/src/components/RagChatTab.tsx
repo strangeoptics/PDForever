@@ -26,6 +26,7 @@ export interface RagChatTabProps {
   currentFilterParams: DocumentFilterParams;
   customOllamaUrl?: string;
   ragModel?: string;
+  ragMaxPassages?: number;
   selectedFolderPath?: string;
   selectedTagName?: string;
   onNavigateToDocument: (documentId: string, pageNumber: number) => void;
@@ -45,6 +46,7 @@ export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
   currentFilterParams,
   customOllamaUrl,
   ragModel = 'qwen2.5:14b',
+  ragMaxPassages = 12,
   selectedFolderPath,
   selectedTagName,
   onNavigateToDocument,
@@ -122,6 +124,7 @@ export const RagChatTab: React.FC<RagChatTabProps> = React.memo(({
       const payload: RagQueryPayload = {
         query: q,
         model: ragModel,
+        maxPassages: ragMaxPassages,
       };
 
       if (ragScope === 'current' && activeDoc) {

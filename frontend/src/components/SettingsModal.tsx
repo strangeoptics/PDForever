@@ -541,6 +541,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+              {/* Number of RAG Passages / Results */}
+              <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                      Anzahl der Quellen / Ergebnisse (Passagen)
+                    </label>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Maximale Anzahl an Textauszügen, die aus Lucene für die Beantwortung herangezogen werden.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={settings.ragMaxPassages ?? 12}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        onUpdateSettings((prev) => ({
+                          ...prev,
+                          ragMaxPassages: isNaN(val) ? 12 : Math.max(1, Math.min(val, 50)),
+                        }));
+                      }}
+                      className="w-16 px-2 py-1 text-center font-semibold rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
+                    />
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Quellen</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  {[6, 8, 12, 16, 20].map((count) => {
+                    const currentVal = settings.ragMaxPassages ?? 12;
+                    const isSelected = currentVal === count;
+                    return (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() =>
+                          onUpdateSettings((prev) => ({ ...prev, ragMaxPassages: count }))
+                        }
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                          isSelected
+                            ? 'bg-purple-600 text-white shadow-xs'
+                            : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {count} {count === 12 ? '(Standard)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Offline hint and copyable command */}
               {!ollamaStatus?.available && (
                 <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-500/5 p-3 space-y-2">

@@ -204,6 +204,7 @@ export interface AppSettings {
   defaultInspectorOpen: boolean;
   ragModel?: string;
   customOllamaUrl?: string;
+  ragMaxPassages?: number;
 }
 
 export interface RagPassage {
@@ -237,6 +238,7 @@ export interface RagQueryPayload {
   documentId?: string | null;
   criteria?: DocumentFilterParams;
   model?: string;
+  maxPassages?: number;
 }
 
 

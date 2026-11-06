@@ -6,7 +6,11 @@ public record RagQueryRequest(
         String query,
         UUID documentId,
         DocumentFilterCriteria criteria,
-        String model
+        String model,
+        Integer maxPassages
 ) {
+    public RagQueryRequest(String query, UUID documentId, DocumentFilterCriteria criteria, String model) {
+        this(query, documentId, criteria, model, null);
+    }
 }
 

@@ -617,6 +617,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
               currentFilterParams={currentFilterParams}
               customOllamaUrl={settings.customOllamaUrl}
               ragModel={settings.ragModel}
+              ragMaxPassages={settings.ragMaxPassages}
               selectedFolderPath={selectedFolderPath}
               selectedTagName={selectedTagName}
               onNavigateToDocument={(docId, page) => onOpenDocument(docId, page)}

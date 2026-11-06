@@ -110,7 +110,10 @@ public class OllamaRagService {
             );
         }
 
-        int maxPassages = properties.rag() != null ? properties.rag().maxPassages() : 6;
+        int defaultMax = properties.rag() != null ? properties.rag().maxPassages() : 12;
+        int maxPassages = (request.maxPassages() != null && request.maxPassages() > 0)
+                ? request.maxPassages()
+                : defaultMax;
         List<RagPassageDto> passages = retrievePassages(query, request.documentId(), request.criteria(), maxPassages);
 
         if (passages.isEmpty()) {
@@ -162,7 +165,10 @@ public class OllamaRagService {
             return;
         }
 
-        int maxPassages = properties.rag() != null ? properties.rag().maxPassages() : 6;
+        int defaultMax = properties.rag() != null ? properties.rag().maxPassages() : 12;
+        int maxPassages = (request.maxPassages() != null && request.maxPassages() > 0)
+                ? request.maxPassages()
+                : defaultMax;
         List<RagPassageDto> passages = retrievePassages(query, request.documentId(), request.criteria(), maxPassages);
         passagesConsumer.accept(passages);
 
