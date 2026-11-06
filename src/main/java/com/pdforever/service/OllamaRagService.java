@@ -341,12 +341,12 @@ public class OllamaRagService {
 
     private String resolveOllamaUrl(String customUrl) {
         if (customUrl != null && !customUrl.isBlank()) {
-            return customUrl.replaceAll("/+$", "");
+            return customUrl.strip().replaceAll("/+$", "");
         }
         if (properties.rag() != null && properties.rag().ollamaUrl() != null && !properties.rag().ollamaUrl().isBlank()) {
-            return properties.rag().ollamaUrl().replaceAll("/+$", "");
+            return properties.rag().ollamaUrl().strip().replaceAll("/+$", "");
         }
-        return "http://localhost:11434";
+        return "http://127.0.0.1:11434";
     }
 
     private String resolveModel(String customModel) {

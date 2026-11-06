@@ -1,4 +1,7 @@
 import {
+  AdRemovalReport,
+  AdRemovalRequestPayload,
+  ApplyAdRemovalPayload,
   CreateNotePayload,
   DocumentFacets,
   DocumentFilterParams,
@@ -6,6 +9,7 @@ import {
   EpubChapterItem,
   MetadataEnrichmentReport,
   OllamaStatus,
+  PageAdAnalysis,
   PaginatedResponse,
   RagPassage,
   RagQueryPayload,
@@ -325,6 +329,119 @@ export const api = {
       .catch((err) => {
         if (err.name !== 'AbortError') {
           onError(err.message || 'Verbindung zu Ollama fehlgeschlagen');
+        }
+        onDone();
+      });
+  },
+
+  analyzeAndRemoveAds(
+    documentId: string,
+    payload: AdRemovalRequestPayload
+  ): Promise<AdRemovalReport> {
+    return fetch(`${API_BASE}/documents/${documentId}/ad-removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(handleJson<AdRemovalReport>);
+  },
+
+  applyAdRemoval(
+    documentId: string,
+    payload: ApplyAdRemovalPayload
+  ): Promise<AdRemovalReport> {
+    return fetch(`${API_BASE}/documents/${documentId}/ad-removal/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(handleJson<AdRemovalReport>);
+  },
+
+  streamAdRemoval(
+    documentId: string,
+    payload: AdRemovalRequestPayload,
+    onPage: (page: PageAdAnalysis) => void,
+    onReport: (report: AdRemovalReport) => void,
+    onError: (error: string) => void,
+    onDone: () => void,
+    signal?: AbortSignal
+  ): void {
+    fetch(`${API_BASE}/documents/${documentId}/ad-removal/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    })
+      .then(async (response) => {
+        if (!response.ok || !response.body) {
+          const errText = await response.text().catch(() => response.statusText);
+          onError(`HTTP ${response.status}: ${errText}`);
+          onDone();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let currentEvent = 'message';
+        let currentData: string[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, '');
+            if (line === '') {
+              if (currentData.length > 0 || currentEvent === 'done') {
+                const fullData = currentData.join('\n');
+                if (currentEvent === 'page') {
+                  try {
+                    const parsed: PageAdAnalysis = JSON.parse(fullData);
+                    onPage(parsed);
+                  } catch (e) {
+                    console.error('Failed to parse page ad analysis SSE:', e);
+                  }
+                } else if (currentEvent === 'report') {
+                  try {
+                    const parsed: AdRemovalReport = JSON.parse(fullData);
+                    onReport(parsed);
+                  } catch (e) {
+                    console.error('Failed to parse ad removal report SSE:', e);
+                  }
+                } else if (currentEvent === 'error') {
+                  try {
+                    const parsed = JSON.parse(fullData);
+                    onError(typeof parsed === 'string' ? parsed : (parsed.error ?? fullData));
+                  } catch {
+                    onError(fullData);
+                  }
+                } else if (currentEvent === 'done') {
+                  onDone();
+                  return;
+                }
+              }
+              currentEvent = 'message';
+              currentData = [];
+            } else if (line.startsWith('event:')) {
+              currentEvent = line.substring(6).trim();
+            } else if (line.startsWith('data:')) {
+              let dataContent = line.substring(5);
+              if (dataContent.startsWith(' {') || dataContent.startsWith(' [')) {
+                dataContent = dataContent.trimStart();
+              }
+              currentData.push(dataContent);
+            }
+          }
+        }
+        onDone();
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          onError(err.message || 'Verbindung zu Ollama VLM fehlgeschlagen');
         }
         onDone();
       });

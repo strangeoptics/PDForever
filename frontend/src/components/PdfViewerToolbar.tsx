@@ -17,6 +17,7 @@ import {
   FileText,
   Maximize2,
   Minimize2,
+  Sparkles,
 } from 'lucide-react';
 import { DocumentItem, ReaderViewMode, ReadingStatus } from '../types';
 
@@ -47,6 +48,7 @@ export interface PdfViewerToolbarProps {
   onCloseSecondaryPane?: () => void;
   inspectorOpen: boolean;
   onToggleInspector?: () => void;
+  onOpenAdRemoval?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
@@ -78,6 +80,7 @@ export const PdfViewerToolbar: React.FC<PdfViewerToolbarProps> = ({
   onCloseSecondaryPane,
   inspectorOpen,
   onToggleInspector,
+  onOpenAdRemoval,
   isFullscreen,
   onToggleFullscreen,
 }) => {
@@ -267,6 +270,19 @@ export const PdfViewerToolbar: React.FC<PdfViewerToolbarProps> = ({
               <span className="hidden 2xl:inline">Buch</span>
             </button>
           </div>
+
+          {/* VLM Ad Detection & Removal Button (Primary Pane) */}
+          {!isSecondaryPane && onOpenAdRemoval && (
+            <button
+              type="button"
+              onClick={onOpenAdRemoval}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition"
+              title="Ganzseitige Werbeanzeigen mit lokalem VLM (Ollama) erkennen & entfernen"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Werbung entfernen</span>
+            </button>
+          )}
 
           {/* Split-View Toggle (Primary Pane) or Close Button (Secondary Pane) */}
           {!isSecondaryPane && onToggleSplitView && (

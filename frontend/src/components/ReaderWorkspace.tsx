@@ -46,6 +46,7 @@ interface ReaderWorkspaceProps {
   onOpenNewNoteModal: (pageNumber: number) => void;
   onEditNote: (note: ReadingNote) => void;
   onDeleteNote: (noteId: string) => void;
+  onOpenAdRemoval?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
@@ -78,6 +79,7 @@ export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = React.memo(({
   onOpenNewNoteModal,
   onEditNote,
   onDeleteNote,
+  onOpenAdRemoval,
   isFullscreen,
   onToggleFullscreen,
 }) => {
@@ -119,6 +121,7 @@ export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = React.memo(({
               onPageChange={onPageChange}
               onRequestCreateNote={onRequestCreateNote}
               onSelectNote={onSelectPrimaryNote}
+              onOpenAdRemoval={onOpenAdRemoval}
               isFullscreen={isFullscreen}
               onToggleFullscreen={onToggleFullscreen}
             />
@@ -179,6 +182,7 @@ export const ReaderWorkspace: React.FC<ReaderWorkspaceProps> = React.memo(({
           onEditNote={onEditNote}
           onDeleteNote={onDeleteNote}
           onSelectNote={onSelectPrimaryNote}
+          onOpenAdRemoval={onOpenAdRemoval}
         />
       )}
     </>

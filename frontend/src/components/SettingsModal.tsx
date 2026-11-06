@@ -68,7 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setOllamaStatus({
         enabled: true,
         available: false,
-        ollamaUrl: settings.customOllamaUrl || 'http://localhost:11434',
+        ollamaUrl: settings.customOllamaUrl || 'http://127.0.0.1:11434',
         currentModel: settings.ragModel || 'qwen2.5:14b',
         installedModels: [],
         message: 'Ollama ist offline oder nicht erreichbar.',
@@ -488,18 +488,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                    Ollama-Endpunkt
+                    Ollama-Adresse (RAG & VLM)
                   </label>
                   <input
                     type="text"
-                    value={settings.customOllamaUrl ?? 'http://localhost:11434'}
+                    value={settings.customOllamaUrl ?? 'http://127.0.0.1:11434'}
                     onChange={(e) =>
                       onUpdateSettings((prev) => ({
                         ...prev,
                         customOllamaUrl: e.target.value.trim() || undefined,
                       }))
                     }
-                    placeholder="http://localhost:11434"
+                    placeholder="http://127.0.0.1:11434"
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
                   />
                 </div>
@@ -601,7 +601,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <p className="text-xs text-amber-700 dark:text-amber-400">
                     Ollama antwortet derzeit nicht auf{' '}
                     <code className="font-mono text-[11px] bg-amber-500/10 px-1 py-0.5 rounded">
-                      {settings.customOllamaUrl || 'http://localhost:11434'}
+                      {settings.customOllamaUrl || 'http://127.0.0.1:11434'}
                     </code>
                     . Starte Ollama in deinem Terminal:
                   </p>
@@ -618,6 +618,116 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* VLM Magazine Ad Detection & Removal Settings */}
+              <div className="space-y-3 pt-3 border-t border-slate-200/80 dark:border-slate-800/80">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Zeitschriften-Werbeanzeigen erkennen & entfernen (VLM)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Prüft jede PDF-Seite mit einem lokalen Vision-Language-Modell über die oben konfigurierte Ollama-Adresse ({settings.customOllamaUrl || 'http://127.0.0.1:11434'}). Cover (Seite 1) und redaktionelle Verzeichnisse (&gt; 40 Wörter) sind geschützt.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      VLM-Modellname
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.adVlmModel ?? 'qwen2.5vl'}
+                      onChange={(e) =>
+                        onUpdateSettings((prev) => ({
+                          ...prev,
+                          adVlmModel: e.target.value,
+                        }))
+                      }
+                      placeholder="qwen2.5vl"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      Mindestkonfidenz (0–1)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.adMinConfidence ?? 0.75}
+                      onChange={(e) => {
+                        const parsed = parseFloat(e.target.value);
+                        if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+                          onUpdateSettings((prev) => ({
+                            ...prev,
+                            adMinConfidence: parsed,
+                          }));
+                        }
+                      }}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      Auflösung (DPI)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={settings.adRenderDpi ?? 140}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value, 10);
+                        if (Number.isFinite(parsed) && parsed >= 1) {
+                          onUpdateSettings((prev) => ({
+                            ...prev,
+                            adRenderDpi: parsed,
+                          }));
+                        }
+                      }}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-rose-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Dry-Run Toggle */}
+                <div className="flex items-center justify-between gap-4 pt-1">
+                  <div>
+                    <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                      Analyse ohne Speichern/Bereinigung (Dry-Run)
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Wenn aktiviert, werden Seiten nur mit dem VLM analysiert, ohne sofort eine bereinigte PDF-Datei zu speichern.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.adDryRun ?? true}
+                    onClick={() =>
+                      onUpdateSettings((prev) => ({
+                        ...prev,
+                        adDryRun: !(prev.adDryRun ?? true),
+                      }))
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      (settings.adDryRun ?? true) ? 'bg-rose-600' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        (settings.adDryRun ?? true) ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
         </div>

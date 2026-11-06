@@ -48,6 +48,7 @@ interface PdfViewerProps {
     boundingBox: BoundingBox;
   }) => void;
   onSelectNote: (note: ReadingNote) => void;
+  onOpenAdRemoval?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
@@ -69,6 +70,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   onPageChange,
   onRequestCreateNote,
   onSelectNote,
+  onOpenAdRemoval,
   isFullscreen,
   onToggleFullscreen,
 }) => {
@@ -499,6 +501,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         onCloseSecondaryPane={onCloseSecondaryPane}
         inspectorOpen={inspectorOpen}
         onToggleInspector={onToggleInspector}
+        onOpenAdRemoval={onOpenAdRemoval}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
       />

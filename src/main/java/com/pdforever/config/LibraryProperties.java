@@ -1,6 +1,7 @@
 package com.pdforever.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -14,8 +15,22 @@ public record LibraryProperties(
         boolean watcherEnabled,
         List<String> cleanRemoveLiterals,
         List<String> cleanRemoveRegexes,
-        RagProperties rag
+        RagProperties rag,
+        AdRemovalProperties adRemoval
 ) {
+    public LibraryProperties(
+            Path rootDir,
+            Path luceneDir,
+            Path coversDir,
+            long debounceMs,
+            boolean watcherEnabled,
+            List<String> cleanRemoveLiterals,
+            List<String> cleanRemoveRegexes,
+            RagProperties rag
+    ) {
+        this(rootDir, luceneDir, coversDir, debounceMs, watcherEnabled, cleanRemoveLiterals, cleanRemoveRegexes, rag, null);
+    }
+
     public record RagProperties(
             boolean enabled,
             String ollamaUrl,
@@ -28,9 +43,10 @@ public record LibraryProperties(
             this(enabled, ollamaUrl, model, maxPassages, "ollama", null);
         }
 
+        @ConstructorBinding
         public RagProperties {
             if (ollamaUrl == null || ollamaUrl.isBlank()) {
-                ollamaUrl = "http://localhost:11434";
+                ollamaUrl = "http://127.0.0.1:11434";
             }
             if (model == null || model.isBlank()) {
                 model = "qwen2.5:14b";
@@ -44,6 +60,33 @@ public record LibraryProperties(
         }
     }
 
+    public record AdRemovalProperties(
+            String ollamaUrl,
+            String model,
+            Double minConfidence,
+            Integer dpi,
+            Boolean dryRun
+    ) {
+        public AdRemovalProperties {
+            if (ollamaUrl == null || ollamaUrl.isBlank()) {
+                ollamaUrl = "http://127.0.0.1:11434";
+            }
+            if (model == null || model.isBlank()) {
+                model = "qwen2.5vl";
+            }
+            if (minConfidence == null || !Double.isFinite(minConfidence) || minConfidence < 0.0 || minConfidence > 1.0) {
+                minConfidence = 0.75;
+            }
+            if (dpi == null || dpi <= 0) {
+                dpi = 140;
+            }
+            if (dryRun == null) {
+                dryRun = true;
+            }
+        }
+    }
+
+    @ConstructorBinding
     public LibraryProperties {
         if (rootDir == null) {
             rootDir = Path.of("./storage");
@@ -58,8 +101,18 @@ public record LibraryProperties(
             debounceMs = 2000L;
         }
         if (rag == null) {
-            rag = new RagProperties(true, "http://localhost:11434", "qwen2.5:14b", 12);
+            rag = new RagProperties(true, "http://127.0.0.1:11434", "qwen2.5:14b", 12);
+        }
+        if (adRemoval == null) {
+            adRemoval = new AdRemovalProperties(
+                    rag.ollamaUrl(),
+                    "qwen2.5vl",
+                    0.75,
+                    140,
+                    true
+            );
         }
     }
 }
+
 

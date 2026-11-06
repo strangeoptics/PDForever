@@ -47,6 +47,9 @@ const SettingsModal = lazy(() =>
 const NoteModal = lazy(() =>
   import('./components/NoteModal').then((m) => ({ default: m.NoteModal }))
 );
+const AdRemovalModal = lazy(() =>
+  import('./components/AdRemovalModal').then((m) => ({ default: m.AdRemovalModal }))
+);
 
 const SETTINGS_STORAGE_KEY = 'pdforever.settings';
 const DARK_MODE_STORAGE_KEY = 'pdforever.darkMode';
@@ -56,7 +59,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   coverLayout: 'left',
   defaultViewMode: 'continuous',
   defaultInspectorOpen: true,
+  customOllamaUrl: 'http://127.0.0.1:11434',
   ragMaxPassages: 12,
+  adVlmModel: 'qwen2.5vl',
+  adMinConfidence: 0.75,
+  adRenderDpi: 140,
+  adDryRun: true,
 };
 
 function loadInitialSettings(): AppSettings {
@@ -84,6 +92,7 @@ export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialDarkMode);
   const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [adRemovalOpen, setAdRemovalOpen] = useState<boolean>(false);
   const [coverCacheVersion, setCoverCacheVersion] = useState<number>(() => Date.now());
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'outline' | 'tags' | 'notes' | 'rag'>(initialUrlState.tab || 'folders');
   const {
@@ -795,6 +804,7 @@ export const App: React.FC = () => {
                 setNoteModalOpen(true);
               }}
               onDeleteNote={handleDeleteNote}
+              onOpenAdRemoval={() => setAdRemovalOpen(true)}
               isFullscreen={isFullscreen}
               onToggleFullscreen={toggleFullscreen}
             />
@@ -931,6 +941,30 @@ export const App: React.FC = () => {
         onCoversCleared={() => setCoverCacheVersion((v) => v + 1)}
         onMetadataEnriched={loadLibraryData}
       />
+        </Suspense>
+      )}
+
+      {/* Magazine Ad Detection & Removal (VLM) Modal */}
+      {adRemovalOpen && activeDoc && (
+        <Suspense fallback={null}>
+          <AdRemovalModal
+            isOpen={adRemovalOpen}
+            document={activeDoc}
+            settings={settings}
+            onUpdateSettings={setSettings}
+            onClose={() => setAdRemovalOpen(false)}
+            onJumpToPage={(pageNumber) => {
+              setTargetJump({ page: pageNumber, timestamp: Date.now() });
+            }}
+            onCleanedDocumentCreated={async (cleanedDocId, openInSplitView) => {
+              await loadLibraryData();
+              if (openInSplitView) {
+                await handleOpenInSplitView(cleanedDocId, 1);
+              } else {
+                await handleOpenDocument(cleanedDocId, 1);
+              }
+            }}
+          />
         </Suspense>
       )}
     </div>

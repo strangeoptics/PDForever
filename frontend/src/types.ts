@@ -205,6 +205,61 @@ export interface AppSettings {
   ragModel?: string;
   customOllamaUrl?: string;
   ragMaxPassages?: number;
+  adVlmModel?: string;
+  adMinConfidence?: number;
+  adRenderDpi?: number;
+  adDryRun?: boolean;
+}
+
+export interface AdRemovalRequestPayload {
+  ollamaUrl?: string;
+  model?: string;
+  minConfidence?: number;
+  dpi?: number;
+  dryRun?: boolean;
+  outputFileName?: string;
+}
+
+export interface ApplyAdRemovalPayload {
+  pagesToRemove: number[];
+  outputFileName?: string;
+}
+
+export interface PageAdAnalysis {
+  pageNumber: number;
+  isCover: boolean;
+  protectedPage: boolean;
+  protectionReason: string | null;
+  matchedProtectedTerms: string[];
+  wordCount: number;
+  vlmIsAd: boolean | null;
+  vlmConfidence: number | null;
+  vlmReason: string | null;
+  vlmError: string | null;
+  markedForRemoval: boolean;
+}
+
+export interface AdRemovalReport {
+  documentId: string;
+  documentFileName: string;
+  documentRelativePath: string;
+  totalPages: number;
+  protectedPagesCount: number;
+  vlmAdCount: number;
+  removedPagesCount: number;
+  keptPagesCount: number;
+  errorCount: number;
+  dryRun: boolean;
+  ollamaUrl: string;
+  model: string;
+  minConfidence: number;
+  dpi: number;
+  pagesMarkedForRemoval: number[];
+  pages: PageAdAnalysis[];
+  cleanedDocumentId: string | null;
+  cleanedFileName: string | null;
+  cleanedRelativePath: string | null;
+  logRelativePath?: string | null;
 }
 
 export interface RagPassage {

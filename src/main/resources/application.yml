@@ -35,5 +35,12 @@ library:
   clean-remove-regexes:
     - "(?<=\\b(?:18|19|20)\\d{2})\\s*--.*$"
   rag:
+    ollama-url: http://127.0.0.1:11434
     max-passages: 12
+  ad-removal:
+    ollama-url: http://127.0.0.1:11434
+    model: qwen2.5vl
+    min-confidence: 0.75
+    dpi: 140
+    dry-run: true
 

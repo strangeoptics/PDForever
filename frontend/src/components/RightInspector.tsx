@@ -19,6 +19,7 @@ import {
   Tag,
   UpdateMetadataPayload,
   UpdateReadingProgressPayload,
+  isEpubDocument,
 } from '../types';
 
 export interface RightInspectorProps {
@@ -34,6 +35,7 @@ export interface RightInspectorProps {
   onEditNote: (note: ReadingNote) => void;
   onDeleteNote: (noteId: string) => void;
   onSelectNote: (note: ReadingNote) => void;
+  onOpenAdRemoval?: () => void;
 }
 
 export const RightInspector: React.FC<RightInspectorProps> = React.memo(
@@ -50,6 +52,7 @@ export const RightInspector: React.FC<RightInspectorProps> = React.memo(
     onEditNote,
     onDeleteNote,
     onSelectNote,
+    onOpenAdRemoval,
   }) => {
     const [editingMetadata, setEditingMetadata] = useState<boolean>(false);
     const [showAbstract, setShowAbstract] = useState<boolean>(false);
@@ -340,6 +343,29 @@ export const RightInspector: React.FC<RightInspectorProps> = React.memo(
             </div>
           )}
         </div>
+
+        {/* Magazine Ad Detection & Removal Section (for PDFs) */}
+        {!isEpubDocument(activeDoc) && onOpenAdRemoval && (
+          <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                Zeitschriften-Werbung (VLM)
+              </h4>
+              <button
+                type="button"
+                onClick={onOpenAdRemoval}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition"
+              >
+                <Sparkles className="w-3 h-3" />
+                Prüfen & Bereinigen
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+              Ganzseitige Werbeanzeigen lokal per Ollama VLM erkennen und als bereinigte PDF speichern.
+            </p>
+          </div>
+        )}
 
         {/* Document Tags Section */}
         <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 space-y-2.5">

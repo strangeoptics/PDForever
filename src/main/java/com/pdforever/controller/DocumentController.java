@@ -1,5 +1,8 @@
 package com.pdforever.controller;
 
+import com.pdforever.dto.AdRemovalReportDto;
+import com.pdforever.dto.AdRemovalRequest;
+import com.pdforever.dto.ApplyAdRemovalRequest;
 import com.pdforever.dto.DocumentDto;
 import com.pdforever.dto.DocumentFacetsDto;
 import com.pdforever.dto.DocumentFilterCriteria;
@@ -11,12 +14,14 @@ import com.pdforever.dto.UpdateReadingProgressRequest;
 import com.pdforever.service.DirectoryScannerService;
 import com.pdforever.service.EpubExtractionService;
 import com.pdforever.service.LibraryManagementService;
+import com.pdforever.service.MagazineAdRemovalService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourceRegion;
 import org.springframework.data.domain.Page;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,6 +32,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/api")
@@ -40,13 +46,16 @@ public class DocumentController {
 
     private final DirectoryScannerService scannerService;
     private final LibraryManagementService libraryService;
+    private final MagazineAdRemovalService adRemovalService;
 
     public DocumentController(
             DirectoryScannerService scannerService,
-            LibraryManagementService libraryService
+            LibraryManagementService libraryService,
+            MagazineAdRemovalService adRemovalService
     ) {
         this.scannerService = scannerService;
         this.libraryService = libraryService;
+        this.adRemovalService = adRemovalService;
     }
 
     @GetMapping("/tree")
@@ -159,6 +168,71 @@ public class DocumentController {
             @RequestParam(defaultValue = "false") boolean force
     ) {
         return libraryService.enrichAllDocuments(force);
+    }
+
+    @PostMapping("/documents/{id}/ad-removal")
+    public AdRemovalReportDto analyzeAndRemoveAds(
+            @PathVariable UUID id,
+            @RequestBody(required = false) AdRemovalRequest request
+    ) {
+        return adRemovalService.analyzeAndCleanDocument(id, request);
+    }
+
+    @PostMapping("/documents/{id}/ad-removal/apply")
+    public AdRemovalReportDto applyAdRemoval(
+            @PathVariable UUID id,
+            @RequestBody ApplyAdRemovalRequest request
+    ) {
+        return adRemovalService.applyCleanedPdf(id, request);
+    }
+
+    @PostMapping(value = "/documents/{id}/ad-removal/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamAdRemoval(
+            @PathVariable UUID id,
+            @RequestBody(required = false) AdRemovalRequest request
+    ) {
+        // Validate parameters upfront so invalid parameters fail fast with 400
+        adRemovalService.resolveAndValidateSettings(request);
+
+        // 30 minute timeout for multi-page VLM magazine analysis
+        SseEmitter emitter = new SseEmitter(1_800_000L);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancelled.set(true));
+        emitter.onTimeout(() -> cancelled.set(true));
+        emitter.onError(ex -> cancelled.set(true));
+
+        Thread.ofVirtual().name("vlm-ad-removal-", 0).start(() -> {
+            try {
+                AdRemovalReportDto report = adRemovalService.analyzeAndCleanDocument(
+                        id,
+                        request,
+                        pageResult -> {
+                            try {
+                                emitter.send(SseEmitter.event().name("page").data(pageResult));
+                            } catch (IOException e) {
+                                cancelled.set(true);
+                            }
+                        },
+                        cancelled::get
+                );
+                if (!cancelled.get()) {
+                    emitter.send(SseEmitter.event().name("report").data(report));
+                    emitter.send(SseEmitter.event().name("done").data(Map.of("done", true)));
+                    emitter.complete();
+                }
+            } catch (Exception e) {
+                if (!cancelled.get()) {
+                    try {
+                        String msg = e.getMessage() != null ? e.getMessage() : "Fehler bei der VLM-Analyse.";
+                        emitter.send(SseEmitter.event().name("error").data(Map.of("error", msg)));
+                    } catch (IOException ignored) {
+                    }
+                    emitter.completeWithError(e);
+                }
+            }
+        });
+
+        return emitter;
     }
 
     /**
